@@ -1,15 +1,9 @@
 {
     "C_Cpp.default.includePath": [
-        "/home/wuwen/Documents/linux-6.5.5/include",
+        "/lib/modules/6.5.0-41-generic/build/include",
+        // "/home/wuwen/Documents/linux-6.5.5/include",
         // "/lib/modules/5.15.0-107-generic/build/include",
     ],
-    "files.associations": {
-        "uaccess.h": "c",
-        "init.h": "c",
-        "types.h": "c",
-        "mutex.h": "c",
-        "blkzoned.h": "c"
-    },
     "C_Cpp.default.compilerPath": "/usr/bin/gcc",
-    "C_Cpp.errorSquiggles": "disabled"
+    // "C_Cpp.errorSquiggles": "disabled"
 }

@@ -19,7 +19,8 @@ static int xcpfs_report_zones_cb(struct blk_zone *zone, unsigned int idx, void *
     struct xcpfs_zone_info *zi = &zm->zone_info[idx];
 
     zm->zone_size = zone->len;
-    zm->zone_capacity = *(sector_t *)((char *)zone->reserved+4);
+    // zm->zone_capacity = *(sector_t *)((char *)zone->reserved+4);
+    zm->zone_capacity = zone->capacity;
 
     zi->cond = zone->cond;
     zi->wp = zone->wp;
@@ -62,6 +63,7 @@ static int xcpfs_init_nat_info(struct super_block *sb) {
     init_xpcfs_rwsem(&nm->nat_info_rwsem)
     nm->cached_nat_count = 0;
     INIT_LIST_HEAD(&nm->nat_list);
+    INIT_LIST_HEAD(&nm->free_nat);
     return 0;
 }
 

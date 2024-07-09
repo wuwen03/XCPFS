@@ -56,6 +56,10 @@ inline int sector_to_block(sector_t sector) {
 
 
 struct xcpfs_nat_entry;
+struct xcpfs_nat_entry_sb {
+	__le32 nid;
+	struct xcpfs_nat_entry ne;
+}
 //on disk super block
 struct xcpfs_super_block {
     __le32 magic;
@@ -65,7 +69,8 @@ struct xcpfs_super_block {
 	__le32 nat_page_count;
 	__le32 zit_page_count;
 	__le32 ssa_page_count;
-	struct xcpfs_nat_entry meta_nat[1+2+2+1];//inode(1),direct(2),indirect(2),double_indirect(1)
+	//inode(1),direct(2),indirect(2),double_indirect(1)
+	struct xcpfs_nat_entry meta_nat[1+2+2+1];
 } __packed;
 
 #define DEF_ADDRS_PER_INODE 900
@@ -208,6 +213,7 @@ struct xcpfs_zm_info {
 struct nat_entry {
 	bool pinned;
 	bool dirty;
+	int nid;
 	int ino;
 	int block_addr;
 	struct list_head nat_link;
@@ -218,6 +224,7 @@ struct xcpfs_nat_info {
 	struct xcpfs_rwsem nat_info_rwsem;
 	int cached_nat_count;
 	struct list_head nat_list;
+	struct list_head free_nat;
 };
 
 struct xcpfs_sb_info {
@@ -259,10 +266,11 @@ void xcpfs_free_page(struct page *page);
 int xcpfs_zone_mgmt(struct super_block *sb,int zone_id,enum req_op op);
 
 /*nat_mgmt.c*/
-int insert_nat(struct super_block *sb, int nid, int blkaddr, bool pinned, bool dirty);
+int insert_nat(struct super_block *sb, int nid, int ino, int blkaddr, bool pinned, bool dirty);
 int remove_nat(struct super_block *sb, int nid);
 int update_nat(struct super_block *sb, int nid,int new_blkaddr,bool pinned);
 struct nat_entry *lookup_nat(struct super_block *sb, int nid);
+struct nat_entry *alloc_free_nat(struct super_block *sb);
 
 /*data.c*/
 enum page_type {
@@ -273,11 +281,7 @@ enum page_type {
 	NR_PAGE_TYPE
 }
 
-struct xcpfs_path {
-	int offset[]
-};
-
-/*submit之前需要完成ino，iblock，op*/
+/*submit之前需要完成sbi,ino，iblock，op*/
 struct xcpfs_io_info {
 	struct xcpfs_sb_info *sbi;
 	struct bio *bio;
@@ -297,6 +301,7 @@ struct xcpfs_io_info {
     struct writeback_control *wbc;
     enum req_op op;
     enum page_type type;
+	bool create;
     spinlock_t io_lock;
 };
 
@@ -307,5 +312,7 @@ void free_xio(struct xcpfs_io_info *xio);
 struct inode *xcpfs_iget(struct super_block *sb, nid_t ino);
 
 /*meta.c*/
-struct page *xcpfs_get_node_page(struct super_block *sb,nid_t nid);
+struct page *get_node_page(struct super_block *sb,nid_t nid,bool create);
+void get_path(int offset[4], int iblock);
+struct page *get_dnode_page(struct page *page,bool create);
 #endif

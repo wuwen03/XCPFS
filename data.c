@@ -2,6 +2,8 @@
 
 #include"xcpfs.h"
 #include"data.h"
+
+
 /*return locked page, and the page should be freed by xcpfs_free_page*/
 struct page* xcpfs_grab_page(struct super_block *sb, block_t block) {
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
@@ -38,6 +40,7 @@ static void xcpfs_read_end_io(struct bio *bio) {
     xio->bio = NULL;
     SetPageUptodate(xio->page);
     unlock_page(xio->page);
+    put_page(xio->page);
     bio_put(bio);
 }
 
@@ -46,13 +49,36 @@ static void xcpfs_write_end_io(struct bio *bio) {
     struct xcpfs_sb_info *sbi = xio->sbi;
     struct super_block *sb = sbi->sb;
     struct inode *inode;
+    struct page *page;
+    struct xcpfs_node *node;
+    int offset[4];
+    int i;
     if(xio->type == META_NODE || xio->type == REG_NODE) {
         update_nat(sb,xio->ino,bio->bi_iter.bi_sector,false);
     } else {
-        
+        //TODO
+        page = get_dnode_page(xio->page,false);
+        node = page_address(page);
+        get_path(offset,page_index(xio->page));
+        for(i = 0; i < 4; i++) {
+            if(i < 3 && offset[i + 1] == -1) {
+                if(i == 0) {
+                    node->i.i_addr[offset[i]] = bio->bi_iter.bi_sector;
+                } else {
+                    node->dn.addr[offset[i]] = bio->bi_iter.bi_sector;
+                }
+                break;
+            } else if(i == 3) {
+                node->dn.addr[offset[i]] = bio->bi_iter.bi_sector;
+            }
+        }
+        SetPageDirty(page);
+        unlock_page(page);
+        put_page(page);
     }
     ClearPageDirty(xio->page);
     unlock_page(xio->page);
+    put_page(xio->page);
     bio_put(bio);
 }
 
@@ -104,7 +130,7 @@ static int submit_node_xio(struct xcpfs_io_info *xio) {
     submit_bio(bio);
     return 0;
 }
-
+//TODO
 static int submit_data_xio(struct xcpfs_io_info *xio) {
     struct xcpfs_sb_info *sbi = xio->sbi;
     struct inode *inode = xcpfs_iget(sbi->sb,xio->ino);
@@ -119,8 +145,11 @@ static int submit_data_xio(struct xcpfs_io_info *xio) {
         page = grab_cache_page_write_begin(mapping,xio->iblock);
     }
     xio->page = page;
+    alloc_zone(xio);
 
-
+    bio = __alloc_bio(xio);
+    submit_bio(bio);
+    return 0;
 }
 
 int xcpfs_submit_xio(struct xcpfs_io_info *xio) {

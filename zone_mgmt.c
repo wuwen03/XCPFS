@@ -237,7 +237,7 @@ static int get_empty_zone(struct super_block *sb) {
             return zi->zone_id;
         }
     }
-    GC()
+    //TODO GC
 }
 
 static bool zone_is_full(struct super_block *sb, int zone_id) {
@@ -279,7 +279,7 @@ retry:
     }
     goto retry;
 }
-
+//fill xio->new_blkaddr according to the op and type in the xio
 void alloc_zone(struct xcpfs_io_info *xio) {
     struct xcpfs_sb_info *sbi = xio->sbi;
     struct xcpfs_zm_info *zm = sbi->zm;
@@ -290,8 +290,8 @@ void alloc_zone(struct xcpfs_io_info *xio) {
     } else {
         zone_id = blk2zone(sbi->sb,xio->old_blkaddr);
         spin_lock(&zm->zm_info_lock);
-        if(zone_is_full(sbi->sb,zone_id)) {
-            zone_id = get_zone(sb,xio->type);
+        if(zone_is_full(sbi->sb,zone_id) || zone_id == 0) {
+            zone_id = get_zone(sbi->sb,xio->type);
         }
         // xio->new_blkaddr = zone_id * (zm->zone_size >> PAGE_SECTORS_SHIFT);
         xio->new_blkaddr = zm->zone_info[zone_id].start >> PAGE_SECTORS_SHIFT;
