@@ -58,7 +58,7 @@ static void xcpfs_write_end_io(struct bio *bio) {
     } else {
         //TODO
         page = get_dnode_page(xio->page,false);
-        node = page_address(page);
+        node = (struct xcpfs_node *)page_address(page);
         get_path(offset,page_index(xio->page));
         for(i = 0; i < 4; i++) {
             if(i < 3 && offset[i + 1] == -1) {
@@ -117,6 +117,9 @@ static int submit_node_xio(struct xcpfs_io_info *xio) {
     int ret;
     if(xio->op == REQ_OP_READ) {
         page = grab_cache_page(mapping,xio->ino);
+        if(PageUptodate(page) && !PageDirty(page)) {
+            return page;
+        }
     } else {
         page = grab_cache_page_write_begin(mapping,xio->ino);
     }
@@ -130,6 +133,7 @@ static int submit_node_xio(struct xcpfs_io_info *xio) {
     submit_bio(bio);
     return 0;
 }
+
 //TODO
 static int submit_data_xio(struct xcpfs_io_info *xio) {
     struct xcpfs_sb_info *sbi = xio->sbi;
@@ -138,17 +142,43 @@ static int submit_data_xio(struct xcpfs_io_info *xio) {
     struct page *page;
     struct bio *bio;
     struct nat_entry *ne;
+    int offset[5] = {-1,-1,-1,-1,-1};
+    struct xcpfs_node *node;
     int ret;
+    int i;
+
     if(xio->op == REQ_OP_READ) {
         page = grab_cache_page(mapping,xio->iblock);
+        if(PageUptodate(page) && !PageDirty(page)) {
+            return page;
+        }
     } else {
         page = grab_cache_page_write_begin(mapping,xio->iblock);
     }
     xio->page = page;
-    alloc_zone(xio);
+    //fill the old_blkaddr of xio
+    get_path(offset,xio->iblock);
+    page = get_dnode_page(page,false);
+    node = (struct xcpfs_node *)page_address(page);
+    for(i = 0; i < 4; i++) {
+        if(i < 3 && offset[i + 1] == -1) {
+            if(i == 0) {
+                xio->old_blkaddr = node->i.i_addr[offset[i]];
+            } else {
+                xio->old_blkaddr = node->dn.addr[offset[i]];
+            }
+            break;
+        } else {
+            xio->old_blkaddr = node->dn.addr[offset[i]];
+        }
+    }
+    unlock_page(page);
+    put_page(page);
 
+    alloc_zone(xio);
     bio = __alloc_bio(xio);
     submit_bio(bio);
+    iput(inode);
     return 0;
 }
 

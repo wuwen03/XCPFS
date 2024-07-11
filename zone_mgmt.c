@@ -174,6 +174,7 @@ int xcpfs_zone_mgmt(struct super_block *sb,int zone_id,enum req_op op) {
     int ret;
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     spin_lock(&sbi->zm->zm_info_lock);
+    xcpfs_down_write(&sbi->zm->zm_info_sem);
     switch( op ){
         case REQ_OP_ZONE_OPEN:
             ret = xcpfs_zone_open(sb,zone_id);
@@ -189,6 +190,7 @@ int xcpfs_zone_mgmt(struct super_block *sb,int zone_id,enum req_op op) {
             break;
     }
     spin_unlock(&sbi->zm->zm_info_lock);
+    xcpfs_up_write(&sbi->zm->zm_info_sem);
     return ret;
 }
 

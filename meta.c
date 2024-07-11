@@ -92,7 +92,7 @@ struct page *get_dnode_page(struct page *page,bool create) {
         if(offset[i+1] == -1) {
             return pages[i];
         }
-        node = page_address(pages[i]);
+        node = (struct xcpfs_node *)page_address(pages[i]);
         if(i == 0) {
             next_nid = node->i.i_nid[offset[0] - DEF_ADDRS_PER_INODE];
         } else {
@@ -110,9 +110,10 @@ struct page *get_dnode_page(struct page *page,bool create) {
             } else {
                 node->in.nid[offset[i]] = ne->nid;
             }
+            SetPageDirty(pages[i]);
             unlock_page(pages[i]);
             ne->ino = inode->i_ino;
-            ne->block_addr = -1;
+            ne->block_addr = 0;
             ne->dirty = true;
             ne->pinned = false;
         }

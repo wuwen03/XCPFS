@@ -44,7 +44,7 @@ static int xcpfs_init_zm_info(struct super_block *sb) {
     int ret = 0;
 
     spin_lock_init(&zm->zm_info_lock);
-    init_xpcfs_rwsem()
+    init_xpcfs_rwsem(&zm->zm_info_sem);
     zm->nr_zones = bdev_nr_zones(bdev);
     zm->max_open_zones = bdev_max_open_zones(bdev);
     zm->max_active_zones = bdev_max_active_zones(bdev);
@@ -113,6 +113,10 @@ free_page:
     return ret;
 }
 
+static void xcpfs_get_zit_info(struct super_block *sb) {
+
+}
+
 static int xcpfs_fill_super(struct super_block* sb, void* data, int silent) {
     struct xcpfs_sb_info *sbi;
 
@@ -130,6 +134,13 @@ static int xcpfs_fill_super(struct super_block* sb, void* data, int silent) {
     xcpfs_init_nat_info(sb);
 
     xcpfs_read_super(sb);
+
+    sbi->meta_ino = 1;
+    sbi->meta_inode = xcpfs_iget(sb,sbi->meta_ino);
+
+    
+
+    xcpfs_get_zit_info(sb);
 }
 
 static struct dentry* xcpfs_mount(struct file_system_type* fs_type, int flags,
