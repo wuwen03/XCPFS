@@ -194,7 +194,7 @@ int xcpfs_zone_mgmt(struct super_block *sb,int zone_id,enum req_op op) {
     return ret;
 }
 
-static int validate_blkaddr(struct super_block *sb, block_t blkaddr) {
+int validate_blkaddr(struct super_block *sb, block_t blkaddr) {
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_zone_info *zi;
@@ -208,10 +208,18 @@ static int validate_blkaddr(struct super_block *sb, block_t blkaddr) {
     set_bit(idx,zi->valid_map);
     zi->vblocks ++;
     zi->dirty = true;
+    zi->wp = max(zi->wp,blkaddr << PAGE_SECTORS_SHIFT);
+    
+    if((idx << PAGE_SECTORS_SHIFT) + 1 == zm->zone_capacity) {
+        zi->cond = BLK_ZONE_COND_FULL;
+        remove_zone_active(sb,zi);
+        remove_zone_opened(sb,zi);
+    }
+
     return 0;
 }
 
-static int invalidate_blkaddr(struct super_block *sb, block_t blkaddr) {
+int invalidate_blkaddr(struct super_block *sb, block_t blkaddr) {
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_zone_info *zi;
@@ -287,6 +295,7 @@ void alloc_zone(struct xcpfs_io_info *xio) {
     struct xcpfs_zm_info *zm = sbi->zm;
     enum req_op op = xio->op;
     int zone_id;
+    
     if(op == REQ_OP_READ) {
         xio->new_blkaddr = xio->old_blkaddr;
     } else {
@@ -297,7 +306,6 @@ void alloc_zone(struct xcpfs_io_info *xio) {
         }
         // xio->new_blkaddr = zone_id * (zm->zone_size >> PAGE_SECTORS_SHIFT);
         xio->new_blkaddr = zm->zone_info[zone_id].start >> PAGE_SECTORS_SHIFT;
-        validate_blkaddr(sbi->sb,xio->new_blkaddr);
         invalidate_blkaddr(sbi->sb,xio->old_blkaddr);
         spin_unlock(&zm->zm_info_lock);
     }

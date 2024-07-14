@@ -1,4 +1,16 @@
 #include"xcpfs.h"
+enum page_type get_page_type(struct xcpfs_sb_info *sbi,int ino, loff_t iblock) {
+    if(ino == sbi->meta_ino) {
+        return META_DATA;
+    }
+    if(ino == sbi->node_ino) {
+        if(iblock < REG_NAT_START) {
+            return META_NODE;
+        }
+        return REG_NODE;
+    }
+    return REG_DATA;
+}
 
 /*return locked page and ref++*/
 struct page *get_node_page(struct super_block *sb,nid_t nid,bool create) {
@@ -8,19 +20,20 @@ struct page *get_node_page(struct super_block *sb,nid_t nid,bool create) {
     struct page *page;
     xio = alloc_xio();
     xio->sbi = sbi;
-    xio->ino = nid;
+    xio->ino = sbi->node_ino;
     xio->iblock = nid;
     xio->op = REQ_OP_READ;
-    xio->type = META_NODE;
+    // xio->type = REG_NODE;
+    xio->type = get_page_type(sbi,xio->ino,xio->iblock);
     xio->create = create;
+    xio->checkpoint = false;
     
-    submit_bio(xio);
+    xcpfs_submit_xio(xio);
     page = xio->page;
     lock_page(page);
     free_xio(xio);
     return page;
 }
-
 
 void get_path(int offset[4], int iblock) {
     int i;
@@ -85,7 +98,7 @@ struct page *get_dnode_page(struct page *page,bool create) {
 
     next_nid = inode->i_ino;
     for(i = 0; i < 4; i++) {
-        pages[i] = get_node_page(sb, next_nid, false);
+        pages[i] = get_node_page(sb, next_nid, create);
         if(!pages[i] || PTR_ERR(pages[i])) {
             return pages[i];
         }
@@ -101,7 +114,7 @@ struct page *get_dnode_page(struct page *page,bool create) {
         unlock_page(pages[i]);
         if(next_nid == 0) {
             if(!create) {
-                return ERR_PTR(-EINVAL);
+                return ERR_PTR(-EIO);
             }
             ne = alloc_free_nat(sb);
             lock_page(pages[i]);
@@ -111,6 +124,7 @@ struct page *get_dnode_page(struct page *page,bool create) {
                 node->in.nid[offset[i]] = ne->nid;
             }
             SetPageDirty(pages[i]);
+            SetPageUptodate(pages[i]);
             unlock_page(pages[i]);
             ne->ino = inode->i_ino;
             ne->block_addr = 0;

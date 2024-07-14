@@ -73,16 +73,17 @@ static void xcpfs_read_super(struct super_block *sb) {
     struct xcpfs_zone_info *zone0,*zone1;
     struct xcpfs_super_block *raw_super;
     struct page *page;
-    struct xcpfs_nat_entry *ne;
+    struct xcpfs_nat_entry_sb *ne;
     int ret = 0;
     int i;
+    int temp;
 
     zone0 = zm->zone_info[0],zone1 = zm->zone_info[1];
     if(zone0->cond == BLK_ZONE_COND_EMPTY) {
         page = xcpfs_grab_page(sb,sector_to_block(zone1->wp));
     } else if(zone1->cond == BLK_ZONE_COND_EMPTY) {
         page = xcpfs_grab_page(sb,sector_to_block(zone0->wp));
-    } else if(zone0->wp > zone1->wp) {
+    } else if(zone0->wp > zone1->wp - zm->zone_size) {
         page = xcpfs_grab_page(sb,sector_to_block(zone1->wp));
     } else {
         page = xcpfs_grab_page(sb,sector_to_block(zone0->wp));
@@ -103,10 +104,11 @@ static void xcpfs_read_super(struct super_block *sb) {
     sbi->nat_page_count = raw_super->nat_page_count;
     sbi->zit_page_count = raw_super->zit_page_count;
     sbi->ssa_page_count = raw_super->ssa_page_count;
+    sbi->total_meta_paga_count = sbi->nat_page_count + sbi->zit_page_count + sbi->ssa_page_count;
 
     for(i = 0; i < 6; i++) {
         ne = &raw_super->meta_nat[i];
-        insert_nat(sb,ne->ino,ne->block_addr,true,true);
+        insert_nat(sb,ne->nid,ne->ne.ino,ne->ne.block_addr,true,true);
     }
 free_page:
     xcpfs_free_page(page);
@@ -114,7 +116,8 @@ free_page:
 }
 
 static void xcpfs_get_zit_info(struct super_block *sb) {
-
+//TODO
+    
 }
 
 static int xcpfs_fill_super(struct super_block* sb, void* data, int silent) {
@@ -127,6 +130,8 @@ static int xcpfs_fill_super(struct super_block* sb, void* data, int silent) {
     sb->s_fs_info = sbi;
     sbi->sb = sb;
 
+    init_xpcfs_rwsem(&sbi->cp_sem);
+
     sbi->zm = kmalloc(sizeof(struct xcpfs_zm_info),GFP_KERNEL);
     xcpfs_init_zm_info(sb);
 
@@ -138,9 +143,11 @@ static int xcpfs_fill_super(struct super_block* sb, void* data, int silent) {
     sbi->meta_ino = 1;
     sbi->meta_inode = xcpfs_iget(sb,sbi->meta_ino);
 
-    
+    sbi->node_ino = 2;
+    sbi->node_inode = xcpfs_iget(sb,sbi->node_ino);
 
     xcpfs_get_zit_info(sb);
+    //TODO
 }
 
 static struct dentry* xcpfs_mount(struct file_system_type* fs_type, int flags,

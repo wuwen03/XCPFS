@@ -70,7 +70,7 @@ struct xcpfs_super_block {
 	__le32 zit_page_count;
 	__le32 ssa_page_count;
 	//inode(1),direct(2),indirect(2),double_indirect(1)
-	struct xcpfs_nat_entry meta_nat[1+2+2+1];
+	struct xcpfs_nat_entry_sb meta_nat[1+2+2+1];
 } __packed;
 
 #define DEF_ADDRS_PER_INODE 900
@@ -227,6 +227,10 @@ struct xcpfs_nat_info {
 	struct list_head free_nat;
 };
 
+#define REG_NAT_START 6000
+#define ZIT_START 600000
+#define SSA_START 800000
+
 struct xcpfs_sb_info {
 	struct super_block *sb;
 	// struct xcpfs_zone_device_info *zone_device_info;
@@ -237,11 +241,19 @@ struct xcpfs_sb_info {
 	int nat_page_count;
 	int zit_page_count;
 	int ssa_page_count;
+	int total_meta_paga_count;
+
 
 	struct xcpfs_zm_info *zm;
 	struct xcpfs_nat_info *nm;
 	struct inode *node_inode;
 	struct inode *meta_inode;
+
+	spinlock_t meta_nat_lock;
+	int meta_nat;
+	struct list meta_nat;
+
+	struct xcpfs_rwsem cp_sem;
 };
 
 
@@ -253,35 +265,41 @@ inline struct xcpfs_sb_info* XCPFS_SB(struct super_block *sb) {
 	return sb->s_fs_info;
 }
 
-
-
-/*data.c*/
-struct page* xcpfs_grab_page(struct super_block *sb, block_t iblock);
-void xcpfs_free_page(struct page *page);
-
 /*zone_mgmt.c*/
 #define EMAXOPEN 1
 #define EMAXACTIVE 2
 #define EZONE 3
-int xcpfs_zone_mgmt(struct super_block *sb,int zone_id,enum req_op op);
+int xcpfs_zone_mgmt(struct super_block *sb,int zone_id,enum req_op op);\
+int validate_blkaddr(struct super_block *sb, block_t blkaddr);
+int invalidate_blkaddr(struct super_block *sb, block_t blkaddr);
+void alloc_zone(struct xcpfs_io_info *xio);
 
 /*nat_mgmt.c*/
 int insert_nat(struct super_block *sb, int nid, int ino, int blkaddr, bool pinned, bool dirty);
 int remove_nat(struct super_block *sb, int nid);
 int update_nat(struct super_block *sb, int nid,int new_blkaddr,bool pinned);
 struct nat_entry *lookup_nat(struct super_block *sb, int nid);
-struct nat_entry *alloc_free_nat(struct super_block *sb);
+struct nat_entry *alloc_free_nat(struct super_block *sb,bool is_meta);
+int invalidate_nat(struct super_block *sb, int nid);
 
 /*data.c*/
+struct page* xcpfs_grab_page(struct super_block *sb, block_t iblock);
+struct page* xcpfs_append_page(struct super_block *sb, struct page *page, int zone_id);
+void xcpfs_free_page(struct page *page);
+
 enum page_type {
 	META_NODE = 1,
 	META_DATA,
 	REG_NODE,
 	REG_DATA,
+	SUPERBLOCK,
 	NR_PAGE_TYPE
 }
 
-/*submit之前需要完成sbi,ino，iblock，op*/
+/*submit之前需要完成
+必填:sbi,ino,iblock,op,type,create,checkpoint,
+选填:page,wbc
+*/
 struct xcpfs_io_info {
 	struct xcpfs_sb_info *sbi;
 	struct bio *bio;
@@ -302,17 +320,37 @@ struct xcpfs_io_info {
     enum req_op op;
     enum page_type type;
 	bool create;
+	bool checkpoint;
     spinlock_t io_lock;
 };
 
 struct xcpfs_io_info *alloc_xio();
 void free_xio(struct xcpfs_io_info *xio);
+int xcpfs_submit_xio(struct xcpfs_io_info *xio);
 
-/*data.c*/
+/*inode.c*/
 struct inode *xcpfs_iget(struct super_block *sb, nid_t ino);
+extern const struct address_space_operations xcpfs_data_aops;
+int xcpfs_getattr(struct user_namespace* mnt_userns, const struct path* path,
+    struct kstat* stat, u32 request_mask, unsigned int flags);
+void xcpfs_updata_inode_page(struct inode *inode,struct writeback_control *wbc);
+struct inode *xcpfs_new_inode(const struct inode *dir,umode_t mode);
 
 /*meta.c*/
+enum page_type get_page_type(struct xcpfs_sb_info *sbi,int ino, loff_t iblock);
 struct page *get_node_page(struct super_block *sb,nid_t nid,bool create);
 void get_path(int offset[4], int iblock);
 struct page *get_dnode_page(struct page *page,bool create);
+
+/*file.c*/
+void xcpfs_truncate(struct inode *inode);
+
+/*reg.c*/
+extern const struct file_operations xcpfs_file_operations;
+extern const struct inode_operations xcpfs_file_inode_operations;
+
+/*checkpoint.c*/
+int do_checkpoint(struct super_block *sb);
+
+
 #endif
