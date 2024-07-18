@@ -15,6 +15,23 @@ static int xcpfs_fill_inode(struct inode *inode,struct xcpfs_inode *ri) {
 	inode->i_mtime.tv_nsec = le32_to_cpu(ri->i_mtime_nsec);
 	inode->i_generation = le32_to_cpu(ri->i_generation);
 } 
+//TODO
+int xcpfs_set_inode(struct inode *inode) {
+    nid_t ino = inode->i_ino;
+    if(ino == 1) {
+        
+    } else if(ino == 2) {
+
+    } else if(S_ISREG(inode->i_mode)) {
+        inode->i_mapping->a_ops = &xcpfs_data_aops;
+        inode->i_op = &xcpfs_file_inode_operations;
+        inode->i_fop = &xcpfs_file_operations;
+    } else if(S_ISDIR(inode->i_mode)) {
+        inode->i_mapping->a_ops = &xcpfs_data_aops;
+        inode->i_op = &xcpfs_dir_inode_operations;
+        inode->i_fop = &xcpfs_dir_operations;
+    }
+}
 
 struct inode *xcpfs_iget(struct super_block *sb, nid_t ino) {
     struct inode *inode;
@@ -30,7 +47,7 @@ struct inode *xcpfs_iget(struct super_block *sb, nid_t ino) {
     }
 
     page = get_node_page(sb,ino,false);
-    if(page || ERR_PTR(page)) {
+    if(IS_ERR_OR_NULL(page)) {
         iget_failed(inode);
         return ERR_PTR(-EIO);
     }
@@ -40,15 +57,7 @@ struct inode *xcpfs_iget(struct super_block *sb, nid_t ino) {
     xcpfs_fill_inode(inode,ri);
     unlock_page(page);
     put_page(page);
-    //TODO
-    if(ino == 1) {
-    } else if(ino == 2) {
-
-    } else if(S_ISREG(inode->i_mode)) {
-        inode->i_mapping->a_ops = &xcpfs_data_aops;
-    } else if(S_ISDIR(inode->i_mode)) {
-        inode->i_mapping->a_ops = &xcpfs_data_aops;
-    }
+    xcpfs_set_inode(inode);
     unlock_new_inode(inode);
     return inode;
 }
@@ -70,7 +79,6 @@ static int xcpfs_read_data_folio(struct file *file, struct folio *folio) {
     xio->page = page;
 
     ret = xcpfs_submit_xio(xio);
-    free_xio(xio);
     return ret;
 }
 
@@ -93,7 +101,6 @@ static int xcpfs_write_data_page(struct page *page, struct writeback_control *wb
     xio->wbc = wbc;
 
     ret = xcpfs_submit_xio(xio);
-    free_xio(xio);
     return ret;
 }
 
@@ -103,30 +110,12 @@ static int xcpfs_write_begin(struct file *file, struct address_space *mapping,
     struct inode *inode = mapping->host;
     struct xcpfs_sb_info *sbi = XCPFS_SB(inode->i_sb);
     struct page *page = NULL;
-    struct xcpfs_io_info *xio;
     int ret = -EAGAIN;
 
     pgoff_t index = ((unsigned long long) pos) >> PAGE_SHIFT;
-
-    page = pagecache_get_page(mapping,index,FGP_LOCK | FGP_WRITE | FGP_CREAT, GFP_NOFS);
+    page = xcpfs_prepare_page(inode,index,true,true);
     *pagep = page;
-
-    xio = alloc_xio();
-    xio->sbi = sbi;
-    xio->ino = inode->i_ino;
-    xio->iblock = index;
-    xio->op = REQ_OP_READ;
-    xio->type = get_page_type(sbi,xio->ino,xio->iblock);
-    xio->create = true;
-    xio->checkpoint = false;
-    xio->page = page;
-
-    xcpfs_submit_xio(xio);
-
-    lock_page(xio->page);
-    free_xio(xio);
     return 0;
-
 }
 
 static int xcpfs_write_end(struct file *file,
@@ -134,21 +123,7 @@ static int xcpfs_write_end(struct file *file,
 			loff_t pos, unsigned len, unsigned copied,
 			struct page *page, void *fsdata)
 {
-    struct inode *inode = page->mapping->host;
-
-    if(!PageUptodate(page)) {
-        SetPageUptodate(page);
-    }
-    set_page_dirty(page);
-    if(inode->i_ino > 2) {    
-        if(pos + copied > i_size_read(inode)) {
-            i_size_write(inode,pos+copied);
-            mark_inode_dirty_sync(inode);
-        }
-    }
-    unlock_page(page);
-    // put_page(page); TODO:这里好像不需要进行
-    return copied;
+    return xcpfs_commit_write(page,pos,copied);
 }
 
 const struct address_space_operations xcpfs_data_aops = {
@@ -169,7 +144,7 @@ int xcpfs_getattr(struct user_namespace* mnt_userns, const struct path* path,
     return 0;
 }
 
-void xcpfs_updata_inode_page(struct inode *inode,struct writeback_control *wbc) {
+void xcpfs_update_inode_page(struct inode *inode) {
     struct super_block *sb = inode->i_sb;
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     struct page *page;
@@ -180,9 +155,10 @@ void xcpfs_updata_inode_page(struct inode *inode,struct writeback_control *wbc) 
     if(!page) {
         return;
     }
+    wait_on_page_writeback(page);
+    set_page_dirty(page);
     node = (struct xcpfs_node *)page_address(page);
     xi = node->i;
-
     xi->i_mode = inode->i_mode;
     xi->i_uid = inode->i_uid;
     xi->i_gid = inode->i_gid;
@@ -201,6 +177,20 @@ void xcpfs_updata_inode_page(struct inode *inode,struct writeback_control *wbc) 
     put_page(page);
 }
 //TODO:xcpfs_new_inode
-struct inode *xcpfs_new_inode(const struct inode *dir,umode_t mode) {
-
+struct inode *xcpfs_new_inode(const struct inode *dir, umode_t mode) {
+    struct inode *inode = new_inode(dir->i_sb);
+    struct xcpfs_sb_info *sbi = XCPFS_INFO(dir->i_sb);
+    struct nat_entry *ne;
+    nid_t ino;
+    if(!inode) {
+        return ERR_PTR(-ENOMEM);
+    }
+    ne = alloc_free_nat(dir->i_sb,false);
+    ino = ne->nid;
+    inode->i_ino = ino;
+    inode->i_mtime = inode->i_atime = inode->i_ctime = current_time(inode);
+    inode->i_blocks = 0;
+    insert_inode_hash(inode);
+    mark_inode_dirty(inode);
+    return inode;
 }

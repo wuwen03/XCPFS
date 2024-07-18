@@ -8,17 +8,16 @@ static struct page *read_raw_nat_block(struct super_block *sb, block_t iblock) {
     struct page *page;
 
     xio->sbi = sbi;
-    xio->op = REQ_OP_READ;
     xio->ino = sbi->meta_ino;
     xio->iblock = iblock;
-    xio->type = META_DATA;
+    xio->op = REQ_OP_READ;
+    xio->type = get_page_type(sbi,xio->ino,xio->iblock);
     xio->create = true;
-    spin_lock_init(&xio->io_lock);
+    xio->checkpoint = false;
+    xio->pagep = &page;
 
     xcpfs_submit_xio(xio);
-    page = xio->page;
     lock_page(page);
-    free_xio(xio);
     return page;
 }
 
@@ -74,8 +73,8 @@ static int __remove_nat(struct super_block *sb, int nid) {
     if(ret == 0) {
         list_del(&ne->nat_link);
         nm->cached_nat_count--;
+        kfree(ne);
     }
-    kfree(ne);
     return ret;
 }
 
@@ -151,12 +150,12 @@ struct nat_entry *lookup_nat(struct super_block *sb, int nid) {
     struct xcpfs_nat_entry *raw_ne;
     block_t iblock = 0;
     int i;
-    int ret = 0;
+    int retried = 0;
 retry:
     xcpfs_down_read(&nm->nat_info_rwsem);
     ne = __lookup_nat(sb,nid);
     xcpfs_up_read(&nm->nat_info_rwsem);
-    if(ne || ret) {
+    if(ne || retried) {
         if(ne && ne->block_addr == 0) {
             return NULL;
         }
@@ -171,7 +170,7 @@ retry:
     }
     unlock_page(page);
     put_page(page);
-    ret = 1;
+    retried = 1;
     goto retry;
 }
 
@@ -187,7 +186,7 @@ int invalidate_nat(struct super_block *sb, int nid) {
     return 0;
 }
 
-//TODO 将metanode分开
+//TODO 将meta node分开
 static bool free_nat_empty(struct xcpfs_nat_info *nm,bool is_meta) {
     int ret = 0;
     xcpfs_down_read(&nm->nat_info_rwsem);

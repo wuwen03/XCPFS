@@ -31,7 +31,10 @@ static int xcpfs_write_inode(struct inode *inode, struct writeback_control *wbc)
     if(inode->i_ino <= 2) {
         return 0;
     }
-    xcpfs_updata_inode_page(inode,wbc);
+    xcpfs_update_inode_page(inode);
+    if(wbc->sync_mode == WB_SYNC_ALL) {
+        
+    }
     return 0;
     //TODO:balance fs
 }

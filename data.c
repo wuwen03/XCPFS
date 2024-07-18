@@ -1,6 +1,5 @@
 
 #include"xcpfs.h"
-#include"data.h"
 
 #include<linux/blk_types.h>
 
@@ -53,201 +52,65 @@ void xcpfs_free_page(struct page *page) {
     __free_page(page);
 }
 
-static void xcpfs_read_end_io(struct bio *bio) {
-    struct xcpfs_io_info *xio = (struct xcpfs_io_info *)bio->bi_private;
-    xio->bio = NULL;
-    SetPageUptodate(xio->page);
-    unlock_page(xio->page);
-    put_page(xio->page);
-    page_count
-    bio_put(bio);
-}
-
-static void xcpfs_write_end_io(struct bio *bio) {
-    struct xcpfs_io_info *xio = (struct xcpfs_io_info *)bio->bi_private;
-    struct xcpfs_sb_info *sbi = xio->sbi;
-    struct super_block *sb = sbi->sb;
-    struct inode *inode;
-    struct page *page;
-    struct xcpfs_node *node;
-    int offset[4];
-    int i;
-
-    if(xio->type == META_NODE || xio->type == REG_NODE) {
-        update_nat(sb,xio->ino,bio->bi_iter.bi_sector,false);
-    } else {
-        //TODO
-        page = get_dnode_page(xio->page,false);
-        node = (struct xcpfs_node *)page_address(page);
-        get_path(offset,page_index(xio->page));
-        for(i = 0; i < 4; i++) {
-            if(i < 3 && offset[i + 1] == -1) {
-                if(i == 0) {
-                    node->i.i_addr[offset[i]] = bio->bi_iter.bi_sector;
-                } else {
-                    node->dn.addr[offset[i]] = bio->bi_iter.bi_sector;
-                }
-                break;
-            } else if(i == 3) {
-                node->dn.addr[offset[i]] = bio->bi_iter.bi_sector;
-            }
-        }
-        SetPageDirty(page);
-        unlock_page(page);
-        put_page(page);
-    }
-    validate_blkaddr(sb,bio->bi_iter.bi_sector >> PAGE_SECTORS_SHIFT);
-
-    ClearPageDirty(xio->page);
-    unlock_page(xio->page);
-    put_page(xio->page);
-    bio_put(bio);
-}
-
-struct xcpfs_io_info *alloc_xio() {
+/*
+return locked page with reference++ or -EIO
+如果for_write,则得到一个uptodate and write begin的page，如果需要create，那么就create
+*/
+struct page *xcpfs_prepare_page(struct inode *inode, pgoff_t index, bool for_write, bool create) {
+    struct xcpfs_sb_info *sbi = XCPFS_SB(inode->i_sb);
+    struct page *page ,dpage;
     struct xcpfs_io_info *xio;
-    xio = (struct xcpfs_io_info *)kzalloc(sizeof(struct xcpfs_io_info),GFP_KERNEL);
-    spin_lock_init(&xio->io_lock);
-}
-
-void free_xio(struct xcpfs_io_info *xio) {
-    kfree(xio);
-}
-
-static struct bio *__alloc_bio(struct xcpfs_io_info *xio) {
-    struct bio *bio;
-    bio = bio_alloc(xio->sbi->sb->s_bdev,1,xio->op,GFP_NOIO);
-    bio_add_page(bio,xio->page,PAGE_SIZE,0);
-    bio->bi_private = xio;
-    xio->bio = bio;
-
-    bio->bi_iter.bi_sector = xio->new_blkaddr << PAGE_SECTORS_SHIFT;
-    if(xio->op == REQ_OP_READ) {
-        bio->bi_end_io = xcpfs_read_end_io;
+    bool need;
+    int offset[5],len;
+    if(for_write) {
+        page = pagecache_get_page(&inode->i_data,index,FGP_LOCK | FGP_WRITE | FGP_CREAT, GFP_NOFS);
+        if(PageWriteback(page)) {
+            wait_for_stable_page(page);
+        }
     } else {
-        bio->bi_end_io = xcpfs_write_end_io;
+        page = grab_cache_page(&inode->i_data,index);
     }
-    return bio;
+    if(PageUptodate(page)) {
+        return page;
+    }
+    dpage = get_dnode_page(page,create,&need); //TODO:需要create的时候不一定实际需要create
+    if(IS_ERR_OR_NULL(dpage)) {
+        return PTR_ERR(-EIO);
+    } else if(need) {
+        zero_user_segment(page,0,BLOCK_SIZE);
+        SetPageUptodate(page);
+    } else {
+        /*此处表明mapping里面不是最新的，且盘上有相应的data block，则读盘*/
+        xio = alloc_xio();
+        xio->sbi = sbi;
+        xio->ino = inode->i_ino;
+        xio->iblock = index;
+        xio->op = REQ_OP_READ;
+        xio->type = get_page_type(sbi,inode->i_ino,index);
+        xio->create = false;
+        xio->checkpoint = false;
+        xio->page = page;
+        xcpfs_submit_xio(xio);
+        lock_page(page);
+        get_page(page);
+    }
+    return page;
 }
 
-static int submit_node_xio(struct xcpfs_io_info *xio) {
-    struct xcpfs_sb_info *sbi = xio->sbi;
-    struct inode *node_inode = sbi->node_inode;
-    struct address_space *mapping = node_inode->i_mapping;
-    struct page *page;
-    struct bio *bio;
-    struct nat_entry *ne;
-    int ret;
-
-    // if(!xio->create && !xio->page) {
-    //     page = find_lock_page(node_inode->i_data,xio->iblock);
-    //     if(!page) {
-    //         return PTR_ERR(-EIO);
-    //     }
-    //     unlock_page(page);
-    //     put_page(page);
-    // }
-
-    if(!xio->page) {   
-        if(xio->op == REQ_OP_READ) {
-            page = grab_cache_page(mapping,xio->ino);
-            if(PageUptodate(page)) {
-                return page;
-            }
-        } else {
-            page = grab_cache_page_write_begin(mapping,xio->ino);
-        }
-        xio->page = page;
+//unlock page and ref --
+int xcpfs_commit_write(struct page *page, int pos, int copied) {
+    struct inode *inode = page->mapping->host;
+    if(!PageUptodate(page)) {
+        SetPageUptodate(page);
     }
-    page = xio->page;
-    if(page == NULL) {
-        return PTR_ERR(-EIO);
-    }
-
-    ne = lookup_nat(sbi->sb,xio->ino);
-    if(ne) {
-        xio->old_blkaddr = ne->block_addr;
-    }
-    alloc_zone(xio);
-
-    bio = __alloc_bio(xio);
-    submit_bio(bio);
-    return 0;
-}
-
-//TODO
-static int submit_data_xio(struct xcpfs_io_info *xio) {
-    struct xcpfs_sb_info *sbi = xio->sbi;
-    struct inode *inode = xcpfs_iget(sbi->sb,xio->ino);
-    struct address_space *mapping = inode->i_mapping;
-    struct page *page;
-    struct bio *bio;
-    struct nat_entry *ne;
-    int offset[5] = {-1,-1,-1,-1,-1};
-    struct xcpfs_node *node;
-    int ret;
-    int i;
-    if(!xio->page) {
-        if(xio->op == REQ_OP_READ) {
-            page = grab_cache_page(mapping,xio->iblock);
-            if(PageUptodate(page)) {
-                return page;
-            }
-        } else {
-            page = grab_cache_page_write_begin(mapping,xio->iblock);
-        }
-        xio->page = page;
-    }
-    page = xio->page;
-    if(page == NULL) {
-        return PTR_ERR(-EIO);
-    }
-    //fill the old_blkaddr of xio
-    get_path(offset,xio->iblock);
-    page = get_dnode_page(page,xio->create);
-    if(PTR_ERR(page) && !xio->create) {
-        return ERR_PTR(page);
-    }
-    node = (struct xcpfs_node *)page_address(page);
-    for(i = 0; i < 4; i++) {
-        if(i < 3 && offset[i + 1] == -1) {
-            if(i == 0) {
-                xio->old_blkaddr = node->i.i_addr[offset[i]];
-            } else {
-                xio->old_blkaddr = node->dn.addr[offset[i]];
-            }
-            break;
-        } else {
-            xio->old_blkaddr = node->dn.addr[offset[i]];
+    set_page_dirty(page);
+    if(inode->i_ino > 2) {
+        if(pos + copied > i_size_read(inode)) {
+            i_size_write(inode,pos+copied);
+            mark_inode_dirty_sync(inode);
         }
     }
     unlock_page(page);
     put_page(page);
-
-    alloc_zone(xio);
-    bio = __alloc_bio(xio);
-    submit_bio(bio);
-    iput(inode);
-    return 0;
-}
-
-int xcpfs_submit_xio(struct xcpfs_io_info *xio) {
-    enum page_type type = xio->type;
-    struct xcpfs_sb_info *sbi = xio->sbi;
-    int ret;
-
-    if(xio->checkpiont == false) {
-        xcpfs_down_read(&sbi->cp_sem);
-    } 
-
-    if(type == META_NODE || type == REG_NODE) {
-        ret = submit_node_xio(xio);
-    } else {
-        ret = submit_data_xio(xio);
-    }
-
-    if(xio->checkpiont == false) {
-        xcpfs_up_read(&sbi->cp_sem);
-    }
-    return ret;
+    return copied;
 }

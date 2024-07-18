@@ -88,7 +88,7 @@ static void xcpfs_read_super(struct super_block *sb) {
     } else {
         page = xcpfs_grab_page(sb,sector_to_block(zone0->wp));
     }
-    if(PTR_ERR(page)) {
+    if(IS_ERR(page)) {
         goto free_page;
     }
     

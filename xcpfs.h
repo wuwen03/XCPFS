@@ -282,11 +282,7 @@ struct nat_entry *lookup_nat(struct super_block *sb, int nid);
 struct nat_entry *alloc_free_nat(struct super_block *sb,bool is_meta);
 int invalidate_nat(struct super_block *sb, int nid);
 
-/*data.c*/
-struct page* xcpfs_grab_page(struct super_block *sb, block_t iblock);
-struct page* xcpfs_append_page(struct super_block *sb, struct page *page, int zone_id);
-void xcpfs_free_page(struct page *page);
-
+/*xio.c*/
 enum page_type {
 	META_NODE = 1,
 	META_DATA,
@@ -298,7 +294,7 @@ enum page_type {
 
 /*submit之前需要完成
 必填:sbi,ino,iblock,op,type,create,checkpoint,
-选填:page,wbc
+选填:page,wbc,pagep
 */
 struct xcpfs_io_info {
 	struct xcpfs_sb_info *sbi;
@@ -313,9 +309,8 @@ struct xcpfs_io_info {
 	block_t old_blkaddr;
 	block_t new_blkaddr;
 
-	struct page *dnode;
-
     struct page *page; //locked page 
+	struct page **pagep;
     struct writeback_control *wbc;
     enum req_op op;
     enum page_type type;
@@ -329,18 +324,27 @@ void free_xio(struct xcpfs_io_info *xio);
 int xcpfs_submit_xio(struct xcpfs_io_info *xio);
 
 /*inode.c*/
+int xcpfs_set_inode(struct inode *inode);
 struct inode *xcpfs_iget(struct super_block *sb, nid_t ino);
 extern const struct address_space_operations xcpfs_data_aops;
 int xcpfs_getattr(struct user_namespace* mnt_userns, const struct path* path,
     struct kstat* stat, u32 request_mask, unsigned int flags);
-void xcpfs_updata_inode_page(struct inode *inode,struct writeback_control *wbc);
+void xcpfs_update_inode_page(struct inode *inode);
 struct inode *xcpfs_new_inode(const struct inode *dir,umode_t mode);
 
 /*meta.c*/
 enum page_type get_page_type(struct xcpfs_sb_info *sbi,int ino, loff_t iblock);
+int get_path(int offset[4], int iblock);
 struct page *get_node_page(struct super_block *sb,nid_t nid,bool create);
-void get_path(int offset[4], int iblock);
-struct page *get_dnode_page(struct page *page,bool create);
+struct page *get_dnode_page(struct page *page,bool create,bool *need);
+
+/*data.c*/
+struct page* xcpfs_grab_page(struct super_block *sb, block_t block);
+int xcpfs_append_page(struct super_block *sb, struct page *page, int zone_id);
+void xcpfs_free_page(struct page *page);
+struct page *xcpfs_prepare_page(struct inode *inode, pgoff_t index, bool for_write, bool create);
+int xcpfs_commit_write(struct page *page, int pos, int copied);
+
 
 /*file.c*/
 void xcpfs_truncate(struct inode *inode);
@@ -352,5 +356,14 @@ extern const struct inode_operations xcpfs_file_inode_operations;
 /*checkpoint.c*/
 int do_checkpoint(struct super_block *sb);
 
+/*dir.c*/
+#define XCPFS_MAX_FNAME_LEN 256
+struct xcpfs_dentry {
+	char name[XCPFS_MAX_FNAME_LEN];
+	nid_t ino;
+	int namelen
+}
+extern const struct file_operations xcpfs_dir_operations;
+extern const struct inode_operations xcpfs_dir_inode_operations;
 
 #endif
