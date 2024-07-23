@@ -5,5 +5,10 @@
         // "/lib/modules/5.15.0-107-generic/build/include",
     ],
     "C_Cpp.default.compilerPath": "/usr/bin/gcc",
+    "files.associations": {
+        "blk_types.h": "c",
+        "uaccess.h": "c",
+        "blkdev.h": "c"
+    },
     // "C_Cpp.errorSquiggles": "disabled"
 }

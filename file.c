@@ -3,7 +3,7 @@
 
 static int xcpfs_recurse(struct inode *inode, int offset[4] ,int depth, int nid) {
     struct super_block *sb = inode->i_sb;
-    struct xcpfs_sb_info *sbi = XCPFS_INFO(sb);
+    struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     struct page *page;
     struct xcpfs_node *node;
     struct direct_node *dn = NULL;
@@ -20,9 +20,9 @@ static int xcpfs_recurse(struct inode *inode, int offset[4] ,int depth, int nid)
     page = get_node_page(sb,nid,false);
     node = (struct xcpfs_node *)page_address(page);
     if(depth == 0) {
-        dn = node->dn;
+        dn = &node->dn;
     } else {
-        in = node->in;
+        in = &node->in;
     }
 
     i = (offset == NULL ? 0 : offset[len - depth - 1]);
@@ -61,14 +61,14 @@ static int xcpfs_recurse(struct inode *inode, int offset[4] ,int depth, int nid)
 static int xcpfs_truncate_blocks(struct inode *inode, struct page *ipage, pgoff_t free_from) {
     struct super_block *sb = inode->i_sb;
     int offset[5] = {-1,-1,-1,-1,-1};
-    int i;
+    int i,len;
     struct xcpfs_node *node;
     struct xcpfs_inode *ri;
     bool flag = false;
 
-    get_path(offset,free_from);
+    len = get_path(offset,free_from);
     node = (struct xcpfs_node *)page_address(ipage);
-    ri = node->i;
+    ri = &node->i;
     
     if(offset[0] < DEF_ADDRS_PER_INODE) {
         for (i = offset[0];i < DEF_ADDRS_PER_INODE; i++) {
@@ -85,7 +85,7 @@ static int xcpfs_truncate_blocks(struct inode *inode, struct page *ipage, pgoff_
             if(ri->i_nid[i]) {
                 xcpfs_recurse(inode,flag?NULL:offset,0,ri->i_nid[i]);
                 if(flag || offset[1] == 0) {
-                    invalidate_nat(ri->i_nid[i]);
+                    invalidate_nat(sb,ri->i_nid[i]);
                     ri->i_nid[i] = 0;
                 }
             }
@@ -98,7 +98,7 @@ static int xcpfs_truncate_blocks(struct inode *inode, struct page *ipage, pgoff_
             if(ri->i_nid[i]) {
                 xcpfs_recurse(inode,flag?NULL:offset,1,ri->i_nid[i]);
                 if(flag || offset[1] == 0) {
-                    invalidate_nat(ri->i_nid[i]);
+                    invalidate_nat(sb,ri->i_nid[i]);
                     ri->i_nid[i] = 0;
                 }
             }
@@ -111,7 +111,7 @@ static int xcpfs_truncate_blocks(struct inode *inode, struct page *ipage, pgoff_
             if(ri->i_nid[i]) {
                 xcpfs_recurse(inode,flag?NULL:offset,2,ri->i_nid[i]);
                 if(flag || offset[1] == 0) {
-                    invalidate_nat(ri->i_nid[i]);
+                    invalidate_nat(sb,ri->i_nid[i]);
                     ri->i_nid[i] = 0;
                 }
             }
@@ -132,32 +132,18 @@ static int xcpfs_truncate_partial_block(struct inode *inode,pgoff_t iblock, int 
         return 0;
     }
 
-    xio = alloc_xio();
-    xio->sbi = inode->i_sb;
-    xio->ino = inode->i_ino;
-    xio->iblock = iblock;
-    xio->op = REQ_OP_READ;
-    xio->type = REG_DATA;
-    xio->create = false;
-    xio->checkpoint = false;
-    xio->pagep = &page;
-
-    ret = xcpfs_submit_xio(xio);
-    if(!ret) {
-        return -1;
+    page = xcpfs_prepare_page(inode,iblock,true,false);
+    if(IS_ERR_OR_NULL(page)) {
+        return -EIO;
     }
-    // page = xio->page;
-    lock_page(page);
     zero_user(page,offset,PAGE_SIZE - offset);
-    set_page_dirty(page);
-    unlock_page(page);
-    put_page(page);
+    xcpfs_commit_write(page,page_offset(page),PAGE_SIZE);
     return 0;
 }
 
 static int xcpfs_do_truncate(struct inode *inode, int from, bool lock) {
     struct super_block *sb = inode->i_sb;
-    struct xcpfs_sb_info *sbi = XCPFS_INFO(sb);
+    struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     pgoff_t free_from,iblock;
     int offset;
     struct page *ipage;
@@ -169,7 +155,7 @@ static int xcpfs_do_truncate(struct inode *inode, int from, bool lock) {
     }
 
     ipage = get_node_page(sb,inode->i_ino,false);
-    if(ERR_PTR(ipage)) {
+    if(IS_ERR_OR_NULL(ipage)) {
         return PTR_ERR(ipage);
     }
 
@@ -188,7 +174,7 @@ static int xcpfs_do_truncate(struct inode *inode, int from, bool lock) {
     return 0;
 }
 
-void xcpfs_truncate(struct inode *inode) {
+int xcpfs_truncate(struct inode *inode) {
     int err;
 
     err = xcpfs_do_truncate(inode,i_size_read(inode),true);

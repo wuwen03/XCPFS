@@ -9,13 +9,13 @@ const struct file_operations xcpfs_file_operations = {
 
 };
 
-static int xcpfs_setattr(struct user_namespace* mnt_userns,
+static int xcpfs_setattr(struct mnt_idmap* idmap,
     struct dentry* dentry, struct iattr* attr)
 {
     struct inode *inode = d_inode(dentry);
     int error;
 
-    error = setattr_prepare(&init_user_ns,dentry,attr);
+    error = setattr_prepare(idmap,dentry,attr);
     if(error) {
         return error;
     }
@@ -29,7 +29,7 @@ static int xcpfs_setattr(struct user_namespace* mnt_userns,
     	xcpfs_truncate(inode);
     }
 
-    setattr_copy(&init_user_ns, inode, attr);
+    setattr_copy(idmap, inode, attr);
     mark_inode_dirty(inode);
     return 0;
 }

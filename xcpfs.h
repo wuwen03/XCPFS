@@ -5,10 +5,10 @@
 #define __KERNEL__
 #endif
 
-#define DEVELOP
-#ifdef DEVELOP
-#define CONFIG_BLK_DEV_ZONED
-#endif
+// #define DEVELOP
+// #ifdef DEVELOP
+// #define CONFIG_BLK_DEV_ZONED
+// #endif
 
 #include<linux/fs.h>
 #include<linux/mutex.h>
@@ -26,6 +26,7 @@
 #include<linux/statfs.h>
 #include<linux/blkdev.h>
 #include<linux/blkzoned.h>
+#include<linux/blk_types.h>
 // #include<asm-generic>
 
 #include"xcpfs_rwsem.h"
@@ -41,25 +42,26 @@ do{\
     printk(KERN_INFO "%s,%d: " str,__FUNCTION__,__LINE__,##args);\
 }while(0);\
 
-#define BLOCK_SIZE 4096
-#define BLOCK_SIZE_BITS 12
-#define BLOCKS_PER_ZONE 
-#define PAGE_SIZE 4096
+// #define BLOCK_SIZE 4096
+// #define BLOCK_SIZE_BITS 12
+// #define BLOCKS_PER_ZONE 
+// #define PAGE_SIZE 4096
 #define XCPFS_MAGIC 0x52064
 typedef int block_t; /*block地址*/
 typedef int nid_t;
 
-inline int sector_to_block(sector_t sector) {
-	return sector >> 3;
-}
+int sector_to_block(sector_t sector);
 
+// struct xcpfs_nat_entry;
 
-
-struct xcpfs_nat_entry;
 struct xcpfs_nat_entry_sb {
 	__le32 nid;
-	struct xcpfs_nat_entry ne;
-}
+	struct ne {
+		uint8_t version;
+		__le32 ino;
+		__le32 block_addr;
+	} ne;
+};
 //on disk super block
 struct xcpfs_super_block {
     __le32 magic;
@@ -70,7 +72,7 @@ struct xcpfs_super_block {
 	__le32 zit_page_count;
 	__le32 ssa_page_count;
 	//inode(1),direct(2),indirect(2),double_indirect(1)
-	struct xcpfs_nat_entry_sb meta_nat[1+2+2+1];
+	struct xcpfs_nat_entry_sb meta_nat[];
 } __packed;
 
 #define DEF_ADDRS_PER_INODE 900
@@ -126,9 +128,13 @@ struct xcpfs_node {
 	struct node_footer footer;
 } __packed;
 
+// struct xcpfs_sit_entry;
+// struct xcpfs_zit_entry;
+
 #define ZONE_VALID_MAP_SIZE 64
-#define SIT_ENTRY_PER_BLOCK (PAGE_SIZE / sizeof(struct xcpfs_sit_entry))
+#define ZIT_ENTRY_PER_BLOCK (PAGE_SIZE / sizeof(struct xcpfs_zit_entry))
 #define ZIT_ENTRY_SIZE (sizeof(struct xcpfs_zit_entry))
+
 #define ZONE_TYPE_FREE 0
 #define ZONE_TYPE_META_NODE 1
 #define ZONE_TYPE_META_DATA 2
@@ -145,18 +151,18 @@ struct xcpfs_zit_entry {
 } __packed;
 
 struct xcpfs_zit_block {
-	struct xcpfs_zit_entry entries[SIT_ENTRY_PER_BLOCK];
+	struct xcpfs_zit_entry entries[ZIT_ENTRY_PER_BLOCK];
 } __packed;
 
-#define NAT_ENTRY_SIZE (sizeof(struct xcpfs_nat_entry))
-#define NAT_ENTRY_PER_BLOCK (PAGE_SIZE/NAT_ENTRY_SIZE)
+
 //on disk nat entry
 struct xcpfs_nat_entry {
 	uint8_t version;
     __le32 ino;
 	__le32 block_addr;
 } __packed;
-
+#define NAT_ENTRY_SIZE (sizeof(struct xcpfs_nat_entry))
+#define NAT_ENTRY_PER_BLOCK (PAGE_SIZE/NAT_ENTRY_SIZE)
 struct xcpfs_nat_block {
 	struct xcpfs_nat_entry entries[NAT_ENTRY_PER_BLOCK];
 } __packed;
@@ -189,7 +195,7 @@ struct xcpfs_zone_info {
 	int zone_id;
 	uint8_t zone_type;
 	int vblocks;
-	uint8_t *valid_map;
+	unsigned long *valid_map;
 };
 
 struct xcpfs_zm_info {
@@ -225,12 +231,13 @@ struct xcpfs_nat_info {
 	int cached_nat_count;
 	struct list_head nat_list;
 	struct list_head free_nat;
+	struct list_head cp_nat;
 };
 
 #define REG_NAT_START 6000
 #define ZIT_START 600000
 #define SSA_START 800000
-
+struct cp_block;
 struct xcpfs_sb_info {
 	struct super_block *sb;
 	// struct xcpfs_zone_device_info *zone_device_info;
@@ -250,10 +257,12 @@ struct xcpfs_sb_info {
 	struct inode *meta_inode;
 
 	spinlock_t meta_nat_lock;
-	int meta_nat;
-	struct list meta_nat;
+	int meta_nat_cnt;
+	struct list_head meta_nat;
 
 	struct xcpfs_rwsem cp_sem;
+	int cp_phase;
+	struct cp_block *cpsb;
 };
 
 
@@ -261,9 +270,9 @@ struct xcpfs_inode_info {
 	struct inode vfs_inode;
 };
 
-inline struct xcpfs_sb_info* XCPFS_SB(struct super_block *sb) {
-	return sb->s_fs_info;
-}
+struct xcpfs_sb_info* XCPFS_SB(struct super_block *sb);
+
+struct xcpfs_io_info;
 
 /*zone_mgmt.c*/
 #define EMAXOPEN 1
@@ -290,11 +299,11 @@ enum page_type {
 	REG_DATA,
 	SUPERBLOCK,
 	NR_PAGE_TYPE
-}
+};
 
 /*submit之前需要完成
-必填:sbi,ino,iblock,op,type,create,checkpoint,
-选填:page,wbc,pagep
+必填:sbi,ino,iblock,op,op_flags,type,page
+选填:wbc,unlock
 */
 struct xcpfs_io_info {
 	struct xcpfs_sb_info *sbi;
@@ -310,16 +319,16 @@ struct xcpfs_io_info {
 	block_t new_blkaddr;
 
     struct page *page; //locked page 
-	struct page **pagep;
     struct writeback_control *wbc;
+
     enum req_op op;
+	blk_opf_t op_flags;
+
     enum page_type type;
-	bool create;
-	bool checkpoint;
-    spinlock_t io_lock;
+	bool unlock;
 };
 
-struct xcpfs_io_info *alloc_xio();
+struct xcpfs_io_info *alloc_xio(void);
 void free_xio(struct xcpfs_io_info *xio);
 int xcpfs_submit_xio(struct xcpfs_io_info *xio);
 
@@ -327,9 +336,9 @@ int xcpfs_submit_xio(struct xcpfs_io_info *xio);
 int xcpfs_set_inode(struct inode *inode);
 struct inode *xcpfs_iget(struct super_block *sb, nid_t ino);
 extern const struct address_space_operations xcpfs_data_aops;
-int xcpfs_getattr(struct user_namespace* mnt_userns, const struct path* path,
+int xcpfs_getattr(struct mnt_idmap * idmap, const struct path* path,
     struct kstat* stat, u32 request_mask, unsigned int flags);
-void xcpfs_update_inode_page(struct inode *inode);
+int xcpfs_update_inode_page(struct inode *inode);
 struct inode *xcpfs_new_inode(const struct inode *dir,umode_t mode);
 
 /*meta.c*/
@@ -342,18 +351,25 @@ struct page *get_dnode_page(struct page *page,bool create,bool *need);
 struct page* xcpfs_grab_page(struct super_block *sb, block_t block);
 int xcpfs_append_page(struct super_block *sb, struct page *page, int zone_id);
 void xcpfs_free_page(struct page *page);
+int do_prepare_page(struct page *page, bool create);
+struct page *__prepare_page(struct inode *inode, pgoff_t index, bool for_write, bool create, bool lock);
 struct page *xcpfs_prepare_page(struct inode *inode, pgoff_t index, bool for_write, bool create);
 int xcpfs_commit_write(struct page *page, int pos, int copied);
-
+int write_single_page(struct page *page, struct writeback_control *wbc);
 
 /*file.c*/
-void xcpfs_truncate(struct inode *inode);
+int xcpfs_truncate(struct inode *inode);
 
 /*reg.c*/
 extern const struct file_operations xcpfs_file_operations;
 extern const struct inode_operations xcpfs_file_inode_operations;
 
 /*checkpoint.c*/
+struct cp_block {
+	int cnt;
+	struct xcpfs_super_block raw_sb;
+};
+
 int do_checkpoint(struct super_block *sb);
 
 /*dir.c*/
@@ -361,8 +377,8 @@ int do_checkpoint(struct super_block *sb);
 struct xcpfs_dentry {
 	char name[XCPFS_MAX_FNAME_LEN];
 	nid_t ino;
-	int namelen
-}
+	int namelen;
+};
 extern const struct file_operations xcpfs_dir_operations;
 extern const struct inode_operations xcpfs_dir_inode_operations;
 

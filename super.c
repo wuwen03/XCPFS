@@ -16,25 +16,34 @@ static void xcpfs_destroy_inode(struct inode *inode) {
     kfree(xi);
 }
 
-static void xcpfs_drop_inode(struct inode *inode) {
+static int xcpfs_drop_inode(struct inode *inode) {
     return generic_drop_inode(inode);
 }
-//TODO：inode truncate
+
 static void xcpfs_evict_inode(struct inode *inode) {
-    struct xcpfs_inode_info *xi = (struct xcpfs_inode_info *)inode;
+    // struct xcpfs_inode_info *xi = (struct xcpfs_inode_info *)inode;
+    if(inode->i_ino <= 2) {
+        return;
+    }
     truncate_inode_pages_final(&inode->i_data);
-    
+    sync_inode_metadata(inode,0);
+    if(!inode->i_link) {
+        inode->i_size = 0;
+        xcpfs_truncate(inode);
+    }
+    invalidate_inode_buffers(inode);
+    clear_inode(inode);
 }
 
 static int xcpfs_write_inode(struct inode *inode, struct writeback_control *wbc) {
     struct xcpfs_sb_info *sbi = XCPFS_SB(inode->i_sb);
-    if(inode->i_ino <= 2) {
+    struct page *page;
+    if(inode->i_ino == 2) {
         return 0;
     }
     xcpfs_update_inode_page(inode);
-    if(wbc->sync_mode == WB_SYNC_ALL) {
-        
-    }
+    page = get_node_page(inode->i_sb,inode->i_ino,false);
+    write_single_page(page,wbc);
     return 0;
     //TODO:balance fs
 }
@@ -50,7 +59,7 @@ static void flush_super_block(struct super_block *sb) {
 
     page = alloc_page(GFP_KERNEL);
     raw_super = (struct xcpfs_super_block *)page_address(page);
-    raw_super = XCPFS_MAGIC;
+    raw_super->magic = XCPFS_MAGIC;
     raw_super->meta_ino = 1;
     raw_super->node_ino = 2;
     raw_super->root_ino = 3;
@@ -58,7 +67,7 @@ static void flush_super_block(struct super_block *sb) {
     raw_super->zit_page_count = sbi->zit_page_count;
     raw_super->ssa_page_count = sbi->ssa_page_count;
 
-    zone0 = zm->zone_info[0],zone1 = zm->zone_info[1];
+    zone0 = &zm->zone_info[0],zone1 = &zm->zone_info[1];
     if(zone0->cond == BLK_ZONE_COND_EMPTY) {
         zone_id = sector_to_block(zone1->wp);
     } else if(zone1->cond == BLK_ZONE_COND_EMPTY) {

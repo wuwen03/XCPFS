@@ -1,23 +1,14 @@
 #include"xcpfs.h"
-#include"data.h"
+// #include"data.h"
+static struct nat_entry *__lookup_nat(struct super_block *sb, int nid) ;
+
 //return locked page and ref++
 static struct page *read_raw_nat_block(struct super_block *sb, block_t iblock) {
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     struct inode *meta_inode = sbi->meta_inode;
-    struct xcpfs_io_info *xio = alloc_xio();
     struct page *page;
-
-    xio->sbi = sbi;
-    xio->ino = sbi->meta_ino;
-    xio->iblock = iblock;
-    xio->op = REQ_OP_READ;
-    xio->type = get_page_type(sbi,xio->ino,xio->iblock);
-    xio->create = true;
-    xio->checkpoint = false;
-    xio->pagep = &page;
-
-    xcpfs_submit_xio(xio);
-    lock_page(page);
+    
+    page = xcpfs_prepare_page(meta_inode,iblock,false,true);
     return page;
 }
 
@@ -125,7 +116,7 @@ int update_nat(struct super_block *sb, int nid,int new_blkaddr,bool pinned) {
     return ret;
 }
 //在缓存中查找
-static static struct nat_entry *__lookup_nat(struct super_block *sb, int nid) {
+static struct nat_entry *__lookup_nat(struct super_block *sb, int nid) {
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     struct xcpfs_nat_info *nm = sbi->nm;
     struct nat_entry *ne;
@@ -133,7 +124,7 @@ static static struct nat_entry *__lookup_nat(struct super_block *sb, int nid) {
     int ret = -ENOKEY;
     list_for_each(it,&nm->nat_list) {
         ne = container_of(it,struct nat_entry,nat_link);
-        if(ne->ni == nid) {
+        if(ne->nid == nid) {
             ret = 0;
             break;
         }
@@ -186,7 +177,7 @@ int invalidate_nat(struct super_block *sb, int nid) {
     return 0;
 }
 
-//TODO 将meta node分开
+//TODO TODO 将meta node分开
 static bool free_nat_empty(struct xcpfs_nat_info *nm,bool is_meta) {
     int ret = 0;
     xcpfs_down_read(&nm->nat_info_rwsem);
@@ -209,7 +200,7 @@ struct nat_entry *alloc_free_nat(struct super_block *sb,bool is_meta) {
         iblock = REG_NAT_START;
     }
 
-    while(free_nat_empty(nm)) {
+    while(free_nat_empty(nm,is_meta)) {
         page = read_raw_nat_block(sb,iblock);
         raw_nats = (struct xcpfs_nat_block *)page_address(page);
         for(i = 0; i < NAT_ENTRY_PER_BLOCK; i++) {
