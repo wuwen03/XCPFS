@@ -19,7 +19,7 @@ static int __remove_zone(struct xcpfs_zone_info **list,int len,struct xcpfs_zone
     if(!tar || !list) {
         return -1;
     }
-    for(i = 0; ;i < len; i++) {
+    for(i = 0; i < len; i++) {
         if(list[i] == tar) {
             list[i] = NULL;
             return 0;
@@ -112,7 +112,7 @@ static int xcpfs_zone_close(struct super_block *sb,int zone_id) {
     int i;
     int ret;
     ret = -EZONE;
-    zi = zm->zone_info[zone_id];
+    zi = &zm->zone_info[zone_id];
     if(zi->cond != BLK_ZONE_COND_EXP_OPEN) {
         goto out;
     }
@@ -133,7 +133,7 @@ static int xcpfs_zone_finish(struct super_block *sb, int zone_id) {
     int i;
     int ret;
     ret = -EZONE;
-    zi = zm->zone_info[zone_id];
+    zi = &zm->zone_info[zone_id];
     if(zi->cond == BLK_ZONE_COND_EMPTY) {
         goto out;
     }
@@ -156,7 +156,7 @@ static int xcpfs_zone_reset(struct super_block *sb, int zone_id) {
     int i;
     int ret;
     ret = -EZONE;
-    zi = zm->zone_info[zone_id];
+    zi = &zm->zone_info[zone_id];
     ret = blkdev_zone_mgmt(sb->s_bdev,REQ_OP_ZONE_RESET,zi->start,zm->zone_size,GFP_NOFS);
     if(ret) {
         goto out;
@@ -188,6 +188,8 @@ int xcpfs_zone_mgmt(struct super_block *sb,int zone_id,enum req_op op) {
         case REQ_OP_ZONE_RESET:
             ret = xcpfs_zone_reset(sb,zone_id);
             break;
+        default:
+            ret = -EIO;
     }
     spin_unlock(&sbi->zm->zm_info_lock);
     xcpfs_up_write(&sbi->zm->zm_info_sem);
@@ -204,7 +206,7 @@ int validate_blkaddr(struct super_block *sb, block_t blkaddr) {
     zone_id = blkaddr / (zm->zone_size >> PAGE_SECTORS_SHIFT);
     idx = blkaddr % (zm->zone_size >> PAGE_SECTORS_SHIFT);
     
-    zi = zm->zone_info[zone_id];
+    zi = &zm->zone_info[zone_id];
     set_bit(idx,zi->valid_map);
     zi->vblocks ++;
     zi->dirty = true;
@@ -229,7 +231,7 @@ int invalidate_blkaddr(struct super_block *sb, block_t blkaddr) {
     zone_id = blkaddr / (zm->zone_size >> PAGE_SECTORS_SHIFT);
     idx = blkaddr % (zm->zone_size >> PAGE_SECTORS_SHIFT);
     
-    zi = zm->zone_info[zone_id];
+    zi = &zm->zone_info[zone_id];
     clear_bit(idx,zi->valid_map);
     zi->vblocks --;
     zi->dirty = true;
@@ -242,12 +244,13 @@ static int get_empty_zone(struct super_block *sb) {
     struct xcpfs_zone_info *zi;
     int i;
     for(i = 2; i < zm->nr_zones; i++) {
-        zi = zm->zone_info[i];
+        zi = &zm->zone_info[i];
         if(zi->cond = BLK_ZONE_COND_EMPTY) {
             return zi->zone_id;
         }
     }
     //TODO GC
+    return 0;
 }
 
 static bool zone_is_full(struct super_block *sb, int zone_id) {
@@ -255,7 +258,7 @@ static bool zone_is_full(struct super_block *sb, int zone_id) {
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_zone_info *zi;
     
-    zi = zm->zone_info[zone_id];
+    zi = &zm->zone_info[zone_id];
     return zi->cond == BLK_ZONE_COND_FULL;
 }
 
@@ -284,7 +287,7 @@ retry:
     if(zm->zone_opened_count < zm->max_open_zones) {
         zone_id = get_empty_zone(sb);
         xcpfs_zone_open(sb,zone_id);
-        zi = zm->zone_info[zone_id];
+        zi = &zm->zone_info[zone_id];
         zi->zone_type = type;
     }
     goto retry;
@@ -309,4 +312,8 @@ void alloc_zone(struct xcpfs_io_info *xio) {
         invalidate_blkaddr(sbi->sb,xio->old_blkaddr);
         spin_unlock(&zm->zm_info_lock);
     }
+}
+
+int flush_dirty_nat(struct xcpfs_sb_info *sbi) {
+    return 0;
 }

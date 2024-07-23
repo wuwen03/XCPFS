@@ -3,7 +3,10 @@
 
 #include<linux/blk_types.h>
 
-/*return locked page, and the page should be freed by xcpfs_free_page*/
+/*
+return locked page, and the page should be freed by xcpfs_free_page
+these function are only used in IO of superblock
+*/
 struct page* xcpfs_grab_page(struct super_block *sb, block_t block) {
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     struct xcpfs_zm_info *zm = sbi->zm;
@@ -21,7 +24,7 @@ struct page* xcpfs_grab_page(struct super_block *sb, block_t block) {
     __bio_add_page(&bio,page,BLOCK_SIZE,0);
     ret = submit_bio_wait(&bio);
     if (ret) {
-        goto free_page
+        goto free_page;
     }
     lock_page(page);
     return page;
@@ -39,9 +42,9 @@ int xcpfs_append_page(struct super_block *sb, struct page *page, int zone_id) {
     bio_init(&bio,sb->s_bdev,&bio_vec,1,REQ_OP_ZONE_APPEND);
     bio.bi_iter.bi_sector = zm->zone_info[zone_id].start;
     __bio_add_page(&bio,page,BLOCK_SIZE,0);
-    ret = subit_bio_wait(&bio);
+    ret = submit_bio_wait(&bio);
     if(ret) {
-        goto free_page
+        goto free_page;
     }
 free_page:
     __free_page(page);
@@ -53,15 +56,62 @@ void xcpfs_free_page(struct page *page) {
 }
 
 /*
-return locked page with reference++ or -EIO
-如果for_write,则得到一个uptodate and write begin的page，如果需要create，那么就create
+page:locked page and ref has been increased
+return:unlockee page with decreased ref
 */
-struct page *xcpfs_prepare_page(struct inode *inode, pgoff_t index, bool for_write, bool create) {
+int do_prepare_page(struct page *page, bool create) {
+    struct inode *inode = page_file_mapping(page)->host;
+    struct xcpfs_sb_info *sbi = XCPFS_SB(inode->i_sb);
+    struct xcpfs_io_info *xio;
+    struct page *dpage;
+    int index = page_index(page);
+    bool need;
+
+    if(PageUptodate(page)) {
+        return 0;
+    }
+
+    if(inode->i_ino == 2) {
+        /*如果是对于node的准备，没有对应的dnode，又因为不是uptodate的page，所以就读盘*/
+        goto read_disk;
+    }
+    /*对于data block的读取，首先要检查是否是要新创建，如果是新创建的，那么不用读盘，否则需要读盘*/
+    dpage = get_dnode_page(page,create,&need); //设定create的时候不一定实际需要create
+    unlock_page(dpage);
+    put_page(dpage);
+    if(IS_ERR_OR_NULL(dpage)) {
+        return -EIO;
+    } else if(need) {
+        zero_user_segment(page,0,BLOCK_SIZE);
+        SetPageUptodate(page);
+    } else {
+    read_disk:
+        /*此处表明mapping里面的page不是uptodate的，且盘上有相应的data block，则读盘*/
+        xio = alloc_xio();
+        xio->sbi = sbi;
+        xio->ino = inode->i_ino;
+        xio->iblock = index;
+        xio->op = REQ_OP_READ;
+        xio->op = REQ_SYNC | REQ_PRIO;
+        xio->type = get_page_type(sbi,inode->i_ino,index);
+        xio->page = page;
+        xio->unlock = true;
+        xcpfs_submit_xio(xio);
+        lock_page(page);
+        get_page(page);
+    }
+    return 0;
+}
+
+struct page *__prepare_page(struct inode *inode, pgoff_t index, bool for_write, bool create, bool lock) {
     struct xcpfs_sb_info *sbi = XCPFS_SB(inode->i_sb);
     struct page *page ,dpage;
-    struct xcpfs_io_info *xio;
     bool need;
-    int offset[5],len;
+    int ret;
+    if(lock) {
+        xcpfs_down_read(&sbi->cp_sem);
+    }
+    
     if(for_write) {
         page = pagecache_get_page(&inode->i_data,index,FGP_LOCK | FGP_WRITE | FGP_CREAT, GFP_NOFS);
         if(PageWriteback(page)) {
@@ -71,35 +121,35 @@ struct page *xcpfs_prepare_page(struct inode *inode, pgoff_t index, bool for_wri
         page = grab_cache_page(&inode->i_data,index);
     }
     if(PageUptodate(page)) {
+        if(lock) {
+            xcpfs_up_read(&sbi->cp_sem);
+        }
         return page;
     }
-    dpage = get_dnode_page(page,create,&need); //TODO:需要create的时候不一定实际需要create
-    if(IS_ERR_OR_NULL(dpage)) {
-        return PTR_ERR(-EIO);
-    } else if(need) {
-        zero_user_segment(page,0,BLOCK_SIZE);
-        SetPageUptodate(page);
-    } else {
-        /*此处表明mapping里面不是最新的，且盘上有相应的data block，则读盘*/
-        xio = alloc_xio();
-        xio->sbi = sbi;
-        xio->ino = inode->i_ino;
-        xio->iblock = index;
-        xio->op = REQ_OP_READ;
-        xio->type = get_page_type(sbi,inode->i_ino,index);
-        xio->create = false;
-        xio->checkpoint = false;
-        xio->page = page;
-        xcpfs_submit_xio(xio);
-        lock_page(page);
-        get_page(page);
+    ret = do_prepare_page(page,create);
+    if (ret) {
+        if(lock) {
+            xcpfs_up_read(&sbi->cp_sem);
+        }
+        return ERR_PTR(ret);
+    }
+    if(!for_write && lock) {
+        xcpfs_up_read(&sbi->cp_sem);
     }
     return page;
 }
 
-//unlock page and ref --
-int xcpfs_commit_write(struct page *page, int pos, int copied) {
+/*
+return locked page with increased reference or -EIO
+如果for_write,则得到一个uptodate and write begin的page，如果需要create，那么就create
+*/
+struct page *xcpfs_prepare_page(struct inode *inode, pgoff_t index, bool for_write, bool create) {
+    return __prepare_page(inode,index,for_write,create,false);
+}
+
+int __commit_write(struct page *page, int pos, int copied, bool locked) {
     struct inode *inode = page->mapping->host;
+    struct xcpfs_sb_info *sbi = XCPFS_SB(inode->i_sb);
     if(!PageUptodate(page)) {
         SetPageUptodate(page);
     }
@@ -112,5 +162,42 @@ int xcpfs_commit_write(struct page *page, int pos, int copied) {
     }
     unlock_page(page);
     put_page(page);
+    if(locked) {
+        xcpfs_up_read(&sbi->cp_sem);
+    }
     return copied;
+}
+
+//unlock page and ref --
+int xcpfs_commit_write(struct page *page, int pos, int copied) {
+    return __commit_write(page,pos,copied,true);
+}
+
+int xcpfs_commit_meta_write(struct page *page, int pos, int copied) {
+    return __commit_write(page,pos,copied,false);
+}
+
+int do_write_single_page(struct page *page,struct writeback_control *wbc) {
+    struct xcpfs_io_info *xio;
+    struct inode *inode = page->mapping->host;
+    int ret;
+    xio = alloc_xio();
+    xio->sbi = XCPFS_SB(inode->i_sb);
+    xio->ino = inode->i_ino;
+    xio->iblock = page_index(page);
+    xio->op = REQ_OP_ZONE_APPEND;
+    xio->op_flags = wbc ? wbc_to_write_flags(wbc) : 0;
+    xio->type = get_page_type(xio->sbi,xio->ino,xio->iblock);
+    xio->page = page;
+    ret= xcpfs_submit_xio(xio);
+    return ret;
+}
+
+//page:locked page
+int write_single_page(struct page *page, struct writeback_control *wbc) {
+    struct inode *inode = page_file_mapping(page)->host;
+    struct xcpfs_sb_info *sbi = XCPFS_SB(inode->i_sb);
+    int ret;
+    ret = do_write_single_page(page,wbc);
+    return ret;
 }

@@ -12,6 +12,14 @@
 #include<linux/blkdev.h>
 #include<linux/blkzoned.h>
 
+int sector_to_block(sector_t sector) {
+	return sector >> 3;
+}
+
+struct xcpfs_sb_info* XCPFS_SB(struct super_block *sb) {
+	return sb->s_fs_info;
+}
+
 static int xcpfs_report_zones_cb(struct blk_zone *zone, unsigned int idx, void *data) {
     struct super_block *sb = (struct super_block *)data;
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
@@ -64,10 +72,11 @@ static int xcpfs_init_nat_info(struct super_block *sb) {
     nm->cached_nat_count = 0;
     INIT_LIST_HEAD(&nm->nat_list);
     INIT_LIST_HEAD(&nm->free_nat);
+    INIT_LIST_HEAD(&nm->cp_nat);
     return 0;
 }
 
-static void xcpfs_read_super(struct super_block *sb) {
+static int xcpfs_read_super(struct super_block *sb) {
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_zone_info *zone0,*zone1;
@@ -78,7 +87,7 @@ static void xcpfs_read_super(struct super_block *sb) {
     int i;
     int temp;
 
-    zone0 = zm->zone_info[0],zone1 = zm->zone_info[1];
+    zone0 = &zm->zone_info[0],zone1 = &zm->zone_info[1];
     if(zone0->cond == BLK_ZONE_COND_EMPTY) {
         page = xcpfs_grab_page(sb,sector_to_block(zone1->wp));
     } else if(zone1->cond == BLK_ZONE_COND_EMPTY) {
@@ -148,6 +157,7 @@ static int xcpfs_fill_super(struct super_block* sb, void* data, int silent) {
 
     xcpfs_get_zit_info(sb);
     //TODO
+    return 0;
 }
 
 static struct dentry* xcpfs_mount(struct file_system_type* fs_type, int flags,

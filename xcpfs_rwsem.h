@@ -2,19 +2,20 @@
 #define XCPFS_RWSEM_H
 
 #include<linux/rwsem.h>
+#include<linux/lockdep_types.h>
 
 struct xcpfs_rwsem {
     struct rw_semaphore internal_rwsem;
-}
+};
 
 #define init_xpcfs_rwsem(sem) \
 do{\
     static struct lock_class_key __key;\
     __init_xcpfs_rwsem((sem),#sem,&__key);\
-} while(0)
+} while(0);
 
 static inline void __init_xcpfs_rwsem(struct xcpfs_rwsem *sem,
-		const char *sem_name, struct lock_class_key *key)
+	const char *sem_name, struct lock_class_key *key)
 {
 	__init_rwsem(&sem->internal_rwsem, sem_name, key);
 }

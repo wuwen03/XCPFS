@@ -62,23 +62,8 @@ int get_path(int offset[4], int iblock) {
 struct page *get_node_page(struct super_block *sb,nid_t nid,bool create) {
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     struct inode *node_inode = sbi->node_inode;
-    // struct xcpfs_io_info *xio;
-    // struct page *page;
-    // xio = alloc_xio();
-    // xio->sbi = sbi;
-    // xio->ino = sbi->node_ino;
-    // xio->iblock = nid;
-    // xio->op = REQ_OP_READ;
-    // // xio->type = REG_NODE;
-    // xio->type = get_page_type(sbi,xio->ino,xio->iblock);
-    // xio->create = create;
-    // xio->checkpoint = false;
-    // xio->pagep = &page;
-    
-    // xcpfs_submit_xio(xio);
-    // lock_page(page);
     struct page *page;
-    page = xcpfs_prepare_page(node_inode,nid,false,create);
+    page = __prepare_page(node_inode,nid,false,create,false);
     return page;
 }
 
@@ -97,10 +82,14 @@ struct page *get_dnode_page(struct page *page,bool create, bool *need) {
     int next_nid,pre_nid;
     int i;
     int len;
+    bool is_meta = false;
     struct xcpfs_node *node;
 
     int iblock = page_index(page);
     len = get_path(offset,iblock);
+    if(inode->i_ino == 1) {
+        is_meta = true;
+    }
     if(need) {
         *need = false;
     }
@@ -136,14 +125,14 @@ struct page *get_dnode_page(struct page *page,bool create, bool *need) {
                 put_page(pages[i]);
                 return ERR_PTR(-EIO);
             }
-            ne = alloc_free_nat(sb);
+            ne = alloc_free_nat(sb,is_meta);
             lock_page(pages[i]);
+            wait_for_stable_page(pages[i]);
             if(i == 0) {
                 node->i.i_nid[offset[0] - DEF_ADDRS_PER_INODE] = ne->nid;
             } else {
                 node->in.nid[offset[i]] = ne->nid;
             }//TODO
-            // SetPageDirty(pages[i]);
             set_page_dirty(pages[i]);
             SetPageUptodate(pages[i]);
             unlock_page(pages[i]);
@@ -156,4 +145,5 @@ struct page *get_dnode_page(struct page *page,bool create, bool *need) {
         pre_nid = next_nid;
         put_page(pages[i]);
     }
+    return ERR_PTR(-EIO);
 }
