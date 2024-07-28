@@ -7,6 +7,10 @@
 return locked page, and the page should be freed by xcpfs_free_page
 these function are only used in IO of superblock
 */
+/*
+return locked page, and the page should be freed by xcpfs_free_page
+these function are only used in IO of superblock
+*/
 struct page* xcpfs_grab_page(struct super_block *sb, block_t block) {
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     struct xcpfs_zm_info *zm = sbi->zm;
@@ -26,6 +30,7 @@ struct page* xcpfs_grab_page(struct super_block *sb, block_t block) {
     ret = submit_bio_wait(&bio);
     XCPFS_INFO("ret:%d",ret);
     if (ret) {
+        goto free_page;
         goto free_page;
     }
     lock_page(page);
@@ -47,6 +52,7 @@ int xcpfs_append_page(struct super_block *sb, struct page *page, int zone_id) {
     ret = submit_bio_wait(&bio);
     XCPFS_INFO("status:%d addr:0x%x",bio.bi_status,bio.bi_iter.bi_sector);
     if(ret) {
+        goto free_page;
         goto free_page;
     }
 free_page:
@@ -74,7 +80,10 @@ int do_prepare_page(struct page *page, bool create) {
     struct xcpfs_io_info *xio;
     struct page *dpage;
     int index = page_index(page);
+    struct page *dpage;
+    int index = page_index(page);
     bool need;
+
 
     if(PageUptodate(page)) {
         return 0;
@@ -96,6 +105,7 @@ int do_prepare_page(struct page *page, bool create) {
     XCPFS_INFO("ino:%d,index:%d,create:%d,need:%d",inode->i_ino,index,create,need)
     if(IS_ERR_OR_NULL(dpage)) {
         return -EIO;
+        return -EIO;
     } else if(need) {
         XCPFS_INFO("need create");
         zero_user_segment(page,0,PAGE_SIZE);
@@ -114,6 +124,7 @@ int do_prepare_page(struct page *page, bool create) {
         xio->op_flags = REQ_SYNC | REQ_PRIO;
         xio->type = get_page_type(sbi,inode->i_ino,index);
         xio->page = page;
+        xio->unlock = true;
         xio->unlock = true;
         xcpfs_submit_xio(xio);
         lock_page(page);
@@ -169,6 +180,15 @@ struct page *xcpfs_prepare_page(struct inode *inode, pgoff_t index, bool for_wri
 }
 
 int __commit_write(struct page *page, int pos, int copied, bool locked) {
+/*
+return locked page with increased reference or -EIO
+如果for_write,则得到一个uptodate and write begin的page，如果需要create，那么就create
+*/
+struct page *xcpfs_prepare_page(struct inode *inode, pgoff_t index, bool for_write, bool create) {
+    return __prepare_page(inode,index,for_write,create,false);
+}
+
+int __commit_write(struct page *page, int pos, int copied, bool locked) {
     struct inode *inode = page->mapping->host;
     struct xcpfs_sb_info *sbi = XCPFS_SB(inode->i_sb);
     XCPFS_INFO("inode ino:%d pos:0x%x copied:%x",inode->i_ino,pos,copied);
@@ -185,6 +205,9 @@ int __commit_write(struct page *page, int pos, int copied, bool locked) {
     }
     unlock_page(page);
     put_page(page);
+    if(locked) {
+        xcpfs_up_read(&sbi->cp_sem);
+    }
     if(locked) {
         xcpfs_up_read(&sbi->cp_sem);
     }
