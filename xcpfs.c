@@ -27,13 +27,13 @@ static int xcpfs_report_zones_cb(struct blk_zone *zone, unsigned int idx, void *
     struct xcpfs_zone_info *zi = &zm->zone_info[idx];
 
     zm->zone_size = zone->len;
-    // zm->zone_capacity = *(sector_t *)((char *)zone->reserved+4);
     zm->zone_capacity = zone->capacity;
 
     zi->cond = zone->cond;
     zi->wp = zone->wp;
     zi->zone_id = idx;
     zi->start = zone->start;
+    XCPFS_INFO("idx:0x%x start:0x%x wp:0x%x cond:0x%x",idx,zi->start,zi->wp,zi->cond);
 
     if(zone->cond == BLK_ZONE_COND_IMP_OPEN || zone->cond == BLK_ZONE_COND_EXP_OPEN) {
         zm->zone_opened[zm->zone_opened_count++] = zi;
@@ -60,8 +60,11 @@ static int xcpfs_init_zm_info(struct super_block *sb) {
     zm->zone_info = kmalloc(sizeof(struct xcpfs_zone_info) * zm->nr_zones, GFP_KERNEL);
     zm->zone_opened = kmalloc(sizeof(struct xcpfs_zone_info*) * zm->max_open_zones, GFP_KERNEL);
     zm->zone_active = kmalloc(sizeof(struct xcpfs_zone_info*) * zm->max_active_zones, GFP_KERNEL);
+    XCPFS_INFO("nr_zones:0x%x open:%d active:%d",zm->nr_zones,zm->max_open_zones,zm->max_active_zones);
     ret = blkdev_report_zones(bdev,0,BLK_ALL_ZONES,xcpfs_report_zones_cb,sb);
-    return ret;
+    XCPFS_INFO("size:0x%x cap:0x%x",zm->zone_size,zm->zone_capacity);
+    XCPFS_INFO("ret:%d",ret);
+    return 0;
 }
 
 static int xcpfs_init_nat_info(struct super_block *sb) {
@@ -77,6 +80,7 @@ static int xcpfs_init_nat_info(struct super_block *sb) {
 }
 
 static int xcpfs_read_super(struct super_block *sb) {
+    DEBUG_AT;
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_zone_info *zone0,*zone1;
@@ -89,27 +93,30 @@ static int xcpfs_read_super(struct super_block *sb) {
 
     zone0 = &zm->zone_info[0],zone1 = &zm->zone_info[1];
     if(zone0->cond == BLK_ZONE_COND_EMPTY) {
-        page = xcpfs_grab_page(sb,sector_to_block(zone1->wp));
+        page = xcpfs_grab_page(sb,sector_to_block(zone1->wp - 1));
     } else if(zone1->cond == BLK_ZONE_COND_EMPTY) {
-        page = xcpfs_grab_page(sb,sector_to_block(zone0->wp));
+        page = xcpfs_grab_page(sb,sector_to_block(zone0->wp - 1));
     } else if(zone0->wp > zone1->wp - zm->zone_size) {
-        page = xcpfs_grab_page(sb,sector_to_block(zone1->wp));
+        page = xcpfs_grab_page(sb,sector_to_block(zone1->wp - 1));
     } else {
-        page = xcpfs_grab_page(sb,sector_to_block(zone0->wp));
+        page = xcpfs_grab_page(sb,sector_to_block(zone0->wp - 1));
     }
-    if(IS_ERR(page)) {
+    if(IS_ERR_OR_NULL(page)) {
         goto free_page;
     }
     
     raw_super = (struct xcpfs_super_block *)page_address(page);
+    XCPFS_INFO("magic:%X  expected:%X",raw_super->magic,XCPFS_MAGIC);
+    // XCPFS_INFO("test:%s",(char *)raw_super);
     if(raw_super->magic != XCPFS_MAGIC) {
-        ret = -1;
+        ret = -EIO;
         goto free_page;
     }
 
     sbi->root_ino = raw_super->root_ino;
     sbi->meta_ino = raw_super->meta_ino;
     sbi->node_ino = raw_super->node_ino;
+    XCPFS_INFO("ino:root:%d meta:%d node:%d",sbi->root_ino,sbi->meta_ino,sbi->node_ino);
     sbi->nat_page_count = raw_super->nat_page_count;
     sbi->zit_page_count = raw_super->zit_page_count;
     sbi->ssa_page_count = raw_super->ssa_page_count;
@@ -117,7 +124,11 @@ static int xcpfs_read_super(struct super_block *sb) {
 
     for(i = 0; i < 6; i++) {
         ne = &raw_super->meta_nat[i];
+        if(ne->nid == 0) {
+            continue;
+        }
         insert_nat(sb,ne->nid,ne->ne.ino,ne->ne.block_addr,true,true);
+        XCPFS_INFO("meta nat: nid:%d,addr:0x%x\n",ne->nid,ne->ne.block_addr);
     }
 free_page:
     xcpfs_free_page(page);
@@ -131,6 +142,8 @@ static void xcpfs_get_zit_info(struct super_block *sb) {
 
 static int xcpfs_fill_super(struct super_block* sb, void* data, int silent) {
     struct xcpfs_sb_info *sbi;
+    struct inode *root_inode;
+    int err = 0;
 
     sbi = kzalloc(sizeof(struct xcpfs_sb_info),GFP_KERNEL);
     if(!sbi) {
@@ -139,23 +152,37 @@ static int xcpfs_fill_super(struct super_block* sb, void* data, int silent) {
     sb->s_fs_info = sbi;
     sbi->sb = sb;
 
-    init_xpcfs_rwsem(&sbi->cp_sem);
+    init_xpcfs_rwsem(&(sbi->cp_sem));
 
     sbi->zm = kmalloc(sizeof(struct xcpfs_zm_info),GFP_KERNEL);
-    xcpfs_init_zm_info(sb);
+    err = xcpfs_init_zm_info(sb);
+
+    if(err) {
+        XCPFS_INFO("err after init_zm_info");
+        return err;
+    }
 
     sbi->nm = kmalloc(sizeof(struct xcpfs_nat_info),GFP_KERNEL);
     xcpfs_init_nat_info(sb);
 
     xcpfs_read_super(sb);
 
-    sbi->meta_ino = 1;
+    // sbi->node_ino = 2;
+    sbi->node_inode = xcpfs_iget(sb,sbi->node_ino);
+    if(!sbi->node_inode) {
+        XCPFS_INFO("node inode error");
+        return -EIO;
+    }
+    
+    // sbi->meta_ino = 1;
     sbi->meta_inode = xcpfs_iget(sb,sbi->meta_ino);
 
-    sbi->node_ino = 2;
-    sbi->node_inode = xcpfs_iget(sb,sbi->node_ino);
+    root_inode = xcpfs_iget(sb,sbi->root_ino);
+    sb->s_op = &xcpfs_sops;
+    sb->s_root = d_make_root(root_inode);
 
-    xcpfs_get_zit_info(sb);
+    sbi->cp_phase = 0;
+    // xcpfs_get_zit_info(sb);
     //TODO
     return 0;
 }
@@ -171,6 +198,9 @@ static struct dentry* xcpfs_mount(struct file_system_type* fs_type, int flags,
 static void kill_xcpfs_super(struct super_block* sb) {
     DEBUG_AT;
     struct inode *inode;
+    if(!sb) {
+        return;
+    }
     list_for_each_entry(inode,&sb->s_inodes,i_sb_list) {
         XCPFS_INFO("ino:%d i_nlink:%d i_count:%d",
                         inode->i_ino,inode->i_nlink,inode->i_count);

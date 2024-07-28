@@ -42,8 +42,8 @@ do{\
     printk(KERN_INFO "%s,%d: " str,__FUNCTION__,__LINE__,##args);\
 }while(0);\
 
-// #define BLOCK_SIZE 4096
-// #define BLOCK_SIZE_BITS 12
+// #define PAGE_SIZE 4096
+#define PAGE_SIZE_BITS 12
 // #define BLOCKS_PER_ZONE 
 // #define PAGE_SIZE 4096
 #define XCPFS_MAGIC 0x52064
@@ -339,7 +339,7 @@ extern const struct address_space_operations xcpfs_data_aops;
 int xcpfs_getattr(struct mnt_idmap * idmap, const struct path* path,
     struct kstat* stat, u32 request_mask, unsigned int flags);
 int xcpfs_update_inode_page(struct inode *inode);
-struct inode *xcpfs_new_inode(const struct inode *dir,umode_t mode);
+struct inode *xcpfs_new_inode(struct mnt_idmap *idmap,const struct inode *dir,umode_t mode);
 
 /*meta.c*/
 enum page_type get_page_type(struct xcpfs_sb_info *sbi,int ino, loff_t iblock);
@@ -382,4 +382,6 @@ struct xcpfs_dentry {
 extern const struct file_operations xcpfs_dir_operations;
 extern const struct inode_operations xcpfs_dir_inode_operations;
 
+/*super.*/
+extern const struct super_operations xcpfs_sops;
 #endif

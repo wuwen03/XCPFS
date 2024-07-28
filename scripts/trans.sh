@@ -1,0 +1,1 @@
+scp -q -r /home/wuwen/XCPFS wuwen@qemu:/home/wuwen/Documents/

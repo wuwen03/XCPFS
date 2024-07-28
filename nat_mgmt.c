@@ -4,6 +4,7 @@ static struct nat_entry *__lookup_nat(struct super_block *sb, int nid) ;
 
 //return locked page and ref++
 static struct page *read_raw_nat_block(struct super_block *sb, block_t iblock) {
+    DEBUG_AT;
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     struct inode *meta_inode = sbi->meta_inode;
     struct page *page;
@@ -26,6 +27,7 @@ static int __insert_nat(struct super_block *sb, int nid, int ino, int blkaddr, b
     //如果已经有了
     t = __lookup_nat(sb,nid);
     if(t) {
+        XCPFS_INFO("nat exists:nid:%d",nid);
         return 0;
     }
 
@@ -122,17 +124,27 @@ static struct nat_entry *__lookup_nat(struct super_block *sb, int nid) {
     struct nat_entry *ne;
     struct list_head *it;
     int ret = -ENOKEY;
+    // XCPFS_INFO("nat list begin");
     list_for_each(it,&nm->nat_list) {
         ne = container_of(it,struct nat_entry,nat_link);
+        // XCPFS_INFO("nid:%d addr:0x%x",ne->nid,ne->block_addr);
         if(ne->nid == nid) {
-            ret = 0;
-            break;
+            return ne;
         }
     }
-    return (ret ? NULL : ne);
+    list_for_each(it,&nm->free_nat) {
+        ne = container_of(it,struct nat_entry,nat_link);
+        // XCPFS_INFO("nid:%d addr:0x%x",ne->nid,ne->block_addr);
+        if(ne->nid == nid) {
+            return ne;
+        }
+    }
+    // XCPFS_INFO("nat list end");
+    return NULL;
 }
 //现在缓存中查找，如果没有，那么读盘
 struct nat_entry *lookup_nat(struct super_block *sb, int nid) {
+    XCPFS_INFO("nid:%d",nid);
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     struct xcpfs_nat_info *nm = sbi->nm;
     struct nat_entry *ne;
@@ -143,22 +155,33 @@ struct nat_entry *lookup_nat(struct super_block *sb, int nid) {
     int i;
     int retried = 0;
 retry:
+    DEBUG_AT;
     xcpfs_down_read(&nm->nat_info_rwsem);
     ne = __lookup_nat(sb,nid);
     xcpfs_up_read(&nm->nat_info_rwsem);
+    DEBUG_AT;
     if(ne || retried) {
-        if(ne && ne->block_addr == 0) {
-            return NULL;
+        if(ne == NULL) {
+            return ne;
         }
+        // if(ne && ne->block_addr == 0 || !ne) {
+        //     XCPFS_INFO("nid free:addr:0x%x",ne?ne->block_addr:0xdeadbeef);
+        //     return NULL;
+        // }
+        XCPFS_INFO("nid:%d addr:0x%x",ne->nid,ne->block_addr);
         return ne;
     }
     iblock = nid / NAT_ENTRY_PER_BLOCK;
     page = read_raw_nat_block(sb,iblock);
     raw_nats = (struct xcpfs_nat_block *)page_address(page);
+    XCPFS_INFO("insert start");
     for(i = 0; i < NAT_ENTRY_PER_BLOCK; i++) {
         raw_ne = &raw_nats->entries[i];
+        if(iblock * NAT_ENTRY_PER_BLOCK + i < 3) continue;
+        XCPFS_INFO("nid:%d addr:0x%x",iblock * NAT_ENTRY_PER_BLOCK + i,raw_ne->block_addr);
         insert_nat(sb, iblock * NAT_ENTRY_PER_BLOCK + i, raw_ne->ino, raw_ne->block_addr, false, false);
     }
+    XCPFS_INFO("insert end");
     unlock_page(page);
     put_page(page);
     retried = 1;
@@ -178,15 +201,25 @@ int invalidate_nat(struct super_block *sb, int nid) {
 }
 
 //TODO TODO 将meta node分开
-static bool free_nat_empty(struct xcpfs_nat_info *nm,bool is_meta) {
-    int ret = 0;
+static struct nat_entry *free_nat_empty(struct xcpfs_nat_info *nm,bool is_meta) {
+    bool ret = 0;
+    struct nat_entry *ne;
     xcpfs_down_read(&nm->nat_info_rwsem);
-    ret = list_empty(&nm->free_nat);
+    list_for_each_entry(ne,&nm->free_nat,nat_link) {
+        if(is_meta && ne->nid >= REG_NAT_START || !is_meta && ne->nid < REG_NAT_START) {
+            continue;
+        }
+        list_del(&ne->nat_link);
+        list_add(&ne->nat_link,&nm->nat_list);
+        xcpfs_up_read(&nm->nat_info_rwsem);
+        return ne;
+    }
     xcpfs_up_read(&nm->nat_info_rwsem);
-    return ret;
+    return NULL;
 }
 
 struct nat_entry *alloc_free_nat(struct super_block *sb,bool is_meta) {
+    DEBUG_AT;
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     struct xcpfs_nat_info *nm = sbi->nm;
     struct nat_entry *ne;
@@ -200,21 +233,28 @@ struct nat_entry *alloc_free_nat(struct super_block *sb,bool is_meta) {
         iblock = REG_NAT_START;
     }
 
-    while(free_nat_empty(nm,is_meta)) {
+    while(!(ne = free_nat_empty(nm,is_meta))) {
         page = read_raw_nat_block(sb,iblock);
         raw_nats = (struct xcpfs_nat_block *)page_address(page);
+        XCPFS_INFO("find free nat begin");
         for(i = 0; i < NAT_ENTRY_PER_BLOCK; i++) {
+            if(iblock * NAT_ENTRY_PER_BLOCK + i < 3) continue;
             raw_ne = &raw_nats->entries[i];
+            if(i == NAT_ENTRY_PER_BLOCK - 1) {
+                XCPFS_INFO("end ne:nid:%d addr:0x%x",iblock * NAT_ENTRY_PER_BLOCK + i,raw_ne->block_addr);
+            }
             insert_nat(sb, iblock * NAT_ENTRY_PER_BLOCK + i, raw_ne->ino, raw_ne->block_addr, false, false);
         }
+        XCPFS_INFO("find free nat end last");
         unlock_page(page);
         put_page(page);
         iblock ++;
     }
-    xcpfs_down_write(&nm->nat_info_rwsem);
-    ne = list_first_entry(&nm->free_nat,struct nat_entry,nat_link);
-    list_del(&ne->nat_link);
-    list_add(&nm->nat_list,&ne->nat_link);
-    xcpfs_up_write(&nm->nat_info_rwsem);
+    // xcpfs_down_write(&nm->nat_info_rwsem);
+    // ne = list_first_entry(&nm->free_nat,struct nat_entry,nat_link);
+    // list_del(&ne->nat_link);
+    // list_add(&ne->nat_link,&nm->nat_list);
+    // xcpfs_up_write(&nm->nat_info_rwsem);
+    XCPFS_INFO("alloc:nid:%d addr:0x%x",ne->nid,ne->block_addr);
     return ne;
 }

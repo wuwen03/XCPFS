@@ -32,7 +32,6 @@ int do_checkpoint(struct super_block *sb) {
     /*下刷reg node,meta data*/
     sbi->cp_phase = 1;
     filemap_write_and_wait_range(sbi->node_inode->i_mapping,REG_NAT_START * PAGE_SIZE,-1);
-
     filemap_write_and_wait_range(sbi->meta_inode->i_mapping,REG_NAT_START * NAT_ENTRY_SIZE,-1);
     filemap_write_and_wait_range(sbi->meta_inode->i_mapping,0,REG_NAT_START * NAT_ENTRY_SIZE - 1);
 

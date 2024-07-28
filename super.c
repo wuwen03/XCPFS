@@ -21,34 +21,62 @@ static int xcpfs_drop_inode(struct inode *inode) {
 }
 
 static void xcpfs_evict_inode(struct inode *inode) {
+    DEBUG_AT;
+    XCPFS_INFO("inode ino:%d size:%d link:%d nlink:%d count:%d",inode->i_ino,inode->i_size,inode->i_link,inode->i_nlink,inode->i_count);
     // struct xcpfs_inode_info *xi = (struct xcpfs_inode_info *)inode;
+    struct xcpfs_sb_info *sbi = XCPFS_SB(inode->i_sb);
+    struct inode *node_inode = sbi->node_inode;
+    int i;
     if(inode->i_ino <= 2) {
+        truncate_inode_pages_final(inode->i_mapping);
+        clear_inode(inode);
         return;
     }
-    truncate_inode_pages_final(&inode->i_data);
+    truncate_inode_pages_final(inode->i_mapping);
     sync_inode_metadata(inode,0);
     if(!inode->i_link) {
         inode->i_size = 0;
         xcpfs_truncate(inode);
+        invalidate_mapping_pages(node_inode->i_mapping,inode->i_ino,inode->i_ino);
     }
     invalidate_inode_buffers(inode);
+    XCPFS_INFO("nrpages:%d",inode->i_data.nrpages);
     clear_inode(inode);
+    XCPFS_INFO("inode state:%x I_FREEING|I_CLEAR:%x",inode->i_state,I_FREEING|I_CLEAR)
+    DEBUG_AT;
 }
 
 static int xcpfs_write_inode(struct inode *inode, struct writeback_control *wbc) {
+    DEBUG_AT;
+    XCPFS_INFO("inode ino:%d",inode->i_ino);
+    XCPFS_INFO("wbc->sync_mode:%d",wbc->sync_mode);
     struct xcpfs_sb_info *sbi = XCPFS_SB(inode->i_sb);
     struct page *page;
     if(inode->i_ino == 2) {
+        // ClearPageDirty(page);
+        // SetPageUptodate(page);
         return 0;
     }
     xcpfs_update_inode_page(inode);
     page = get_node_page(inode->i_sb,inode->i_ino,false);
-    write_single_page(page,wbc);
+    if(IS_ERR_OR_NULL(page)) {
+        XCPFS_INFO("fail to get inode page:ino %d",inode->i_ino);
+        return -EIO;
+    }
+    if(wbc->sync_mode == WB_SYNC_NONE) {
+        XCPFS_INFO("writing inode ino:%d page ptr:0x%p",inode->i_ino,page);
+        XCPFS_INFO("page index:%d refcount:%d",page_to_index(page),page_ref_count(page));
+        write_single_page(page,wbc);
+        get_page(page);//为了实现方便
+    }
+    unlock_page(page);
+    put_page(page);
     return 0;
     //TODO:balance fs
 }
 
 static void flush_super_block(struct super_block *sb) {
+    DEBUG_AT;
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_nat_info *nm = sbi->nm;
@@ -69,13 +97,17 @@ static void flush_super_block(struct super_block *sb) {
 
     zone0 = &zm->zone_info[0],zone1 = &zm->zone_info[1];
     if(zone0->cond == BLK_ZONE_COND_EMPTY) {
-        zone_id = sector_to_block(zone1->wp);
+        // zone_id = sector_to_block(zone1->wp);
+        zone_id = 1;
     } else if(zone1->cond == BLK_ZONE_COND_EMPTY) {
-        zone_id = sector_to_block(zone0->wp);
+        // zone_id = sector_to_block(zone0->wp);
+        zone_id = 0;
     } else if(zone0->wp > zone1->wp - zm->zone_size) {
-        zone_id = sector_to_block(zone1->wp);
+        // zone_id = sector_to_block(zone1->wp);
+        zone_id = 1;
     } else {
-        zone_id = sector_to_block(zone0->wp);
+        // zone_id = sector_to_block(zone0->wp);
+        zone_id = 0;
     }
     xcpfs_append_page(sb,page,zone_id);
     xcpfs_free_page(page);
@@ -83,6 +115,7 @@ static void flush_super_block(struct super_block *sb) {
 
 //TODO:元数据的下刷
 static void xcpfs_put_super(struct super_block* sb) {
+    DEBUG_AT;
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_nat_info *nm = sbi->nm;
@@ -91,9 +124,11 @@ static void xcpfs_put_super(struct super_block* sb) {
     struct xcpfs_zone_info *zone0,*zone1;
     int zone_id;
 
-    do_checkpoint(sb);
+    // do_checkpoint(sb);
     
     flush_super_block(sb);
+
+    // iput(sbi->node_inode);
 
     sb->s_fs_info = NULL;
 
@@ -110,10 +145,21 @@ static void xcpfs_put_super(struct super_block* sb) {
 }
 //just for debug
 static int xcpfs_statfs(struct dentry* dentry, struct kstatfs* buf) {
-    return -EIO;
+    struct super_block *sb = dentry->d_inode->i_sb;
+    struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
+    struct nat_entry *ne;
+    struct inode *inode;
+    list_for_each_entry(ne,&sbi->nm->nat_list,nat_link) {
+        XCPFS_INFO("nid:%d addr:0x%x ino:%d",ne->nid,ne->block_addr,ne->ino);
+    }
+    list_for_each_entry(inode,&sb->s_inodes,i_sb_list) {
+        XCPFS_INFO("ino:%d i_nlink:%d i_count:%d",
+                        inode->i_ino,inode->i_nlink,inode->i_count);
+    }
+    return 0;
 }
 
-const struct super_operations sfs_sops = {
+const struct super_operations xcpfs_sops = {
     .alloc_inode = xcpfs_alloc_inode,
     .destroy_inode = xcpfs_destroy_inode,
     .write_inode = xcpfs_write_inode,

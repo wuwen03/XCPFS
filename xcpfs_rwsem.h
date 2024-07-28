@@ -32,6 +32,7 @@ static inline int xcpfs_rwsem_is_contended(struct xcpfs_rwsem *sem)
 
 static inline void xcpfs_down_read(struct xcpfs_rwsem *sem)
 {
+	printk(KERN_INFO"DOWN READ");
 	down_read(&sem->internal_rwsem);
 }
 
@@ -42,6 +43,7 @@ static inline int xcpfs_down_read_trylock(struct xcpfs_rwsem *sem)
 
 static inline void xcpfs_up_read(struct xcpfs_rwsem *sem)
 {
+	printk(KERN_INFO"UP READ");
 	up_read(&sem->internal_rwsem);
 }
 

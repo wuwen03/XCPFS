@@ -197,12 +197,13 @@ int xcpfs_zone_mgmt(struct super_block *sb,int zone_id,enum req_op op) {
 }
 
 int validate_blkaddr(struct super_block *sb, block_t blkaddr) {
+    DEBUG_AT;
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_zone_info *zi;
     int zone_id;
     int idx;
-
+    return 0;
     zone_id = blkaddr / (zm->zone_size >> PAGE_SECTORS_SHIFT);
     idx = blkaddr % (zm->zone_size >> PAGE_SECTORS_SHIFT);
     
@@ -211,6 +212,7 @@ int validate_blkaddr(struct super_block *sb, block_t blkaddr) {
     zi->vblocks ++;
     zi->dirty = true;
     zi->wp = max(zi->wp,blkaddr << PAGE_SECTORS_SHIFT);
+    // zi->wp = umax(zi->wp,blkaddr << PAGE_SECTORS_SHIFT);
     
     if((idx << PAGE_SECTORS_SHIFT) + 1 == zm->zone_capacity) {
         zi->cond = BLK_ZONE_COND_FULL;
@@ -222,12 +224,13 @@ int validate_blkaddr(struct super_block *sb, block_t blkaddr) {
 }
 
 int invalidate_blkaddr(struct super_block *sb, block_t blkaddr) {
+    DEBUG_AT;
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_zone_info *zi;
     int zone_id;
     int idx;
-
+    return 0; //TODO
     zone_id = blkaddr / (zm->zone_size >> PAGE_SECTORS_SHIFT);
     idx = blkaddr % (zm->zone_size >> PAGE_SECTORS_SHIFT);
     
@@ -294,15 +297,18 @@ retry:
 }
 //fill xio->new_blkaddr according to the op and type in the xio
 void alloc_zone(struct xcpfs_io_info *xio) {
+    DEBUG_AT;
     struct xcpfs_sb_info *sbi = xio->sbi;
     struct xcpfs_zm_info *zm = sbi->zm;
     enum req_op op = xio->op;
     int zone_id;
-    
+
     if(op == REQ_OP_READ) {
+        XCPFS_INFO("read op old addr:0x%x",xio->old_blkaddr);
         xio->new_blkaddr = xio->old_blkaddr;
     } else {
         zone_id = blk2zone(sbi->sb,xio->old_blkaddr);
+        XCPFS_INFO("write op zone id:0x%x",zone_id);
         spin_lock(&zm->zm_info_lock);
         if(zone_is_full(sbi->sb,zone_id) || zone_id == 0) {
             zone_id = get_zone(sbi->sb,xio->type);
@@ -311,6 +317,7 @@ void alloc_zone(struct xcpfs_io_info *xio) {
         xio->new_blkaddr = zm->zone_info[zone_id].start >> PAGE_SECTORS_SHIFT;
         invalidate_blkaddr(sbi->sb,xio->old_blkaddr);
         spin_unlock(&zm->zm_info_lock);
+        XCPFS_INFO("write op zslba:0x%x",xio->new_blkaddr);
     }
 }
 

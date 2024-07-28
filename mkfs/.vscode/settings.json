@@ -1,0 +1,8 @@
+{
+    "C_Cpp.default.includePath": [
+        "/home/wuwen/linux-6.5/inlucde"
+    ],
+    "files.associations": {
+        "stat.h": "c"
+    }
+}

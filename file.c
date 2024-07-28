@@ -2,6 +2,7 @@
 #include"xcpfs.h"
 
 static int xcpfs_recurse(struct inode *inode, int offset[4] ,int depth, int nid) {
+    DEBUG_AT;
     struct super_block *sb = inode->i_sb;
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     struct page *page;
@@ -52,6 +53,7 @@ static int xcpfs_recurse(struct inode *inode, int offset[4] ,int depth, int nid)
         ClearPageUptodate(page);
     } else {
         set_page_dirty(page);
+        // SetPageDirty(page);
     }
     unlock_page(page);
     put_page(page);
@@ -59,6 +61,7 @@ static int xcpfs_recurse(struct inode *inode, int offset[4] ,int depth, int nid)
 }
 
 static int xcpfs_truncate_blocks(struct inode *inode, struct page *ipage, pgoff_t free_from) {
+    DEBUG_AT;
     struct super_block *sb = inode->i_sb;
     int offset[5] = {-1,-1,-1,-1,-1};
     int i,len;
@@ -120,15 +123,17 @@ static int xcpfs_truncate_blocks(struct inode *inode, struct page *ipage, pgoff_
         flag = true;
     }
     set_page_dirty(ipage);
+    // SetPageDirty(ipage);
     return 0;
 }
 
 static int xcpfs_truncate_partial_block(struct inode *inode,pgoff_t iblock, int offset) {
+    DEBUG_AT;
     struct page *page;
     struct xcpfs_io_info *xio;
     int ret = -EAGAIN;
 
-    if(offset == BLOCK_SIZE) {
+    if(offset == 0) {
         return 0;
     }
 
@@ -142,13 +147,14 @@ static int xcpfs_truncate_partial_block(struct inode *inode,pgoff_t iblock, int 
 }
 
 static int xcpfs_do_truncate(struct inode *inode, int from, bool lock) {
+    DEBUG_AT;
     struct super_block *sb = inode->i_sb;
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     pgoff_t free_from,iblock;
     int offset;
     struct page *ipage;
 
-    free_from = (pgoff_t)((from + BLOCK_SIZE - 1) >> BLOCK_SIZE_BITS);
+    free_from = (pgoff_t)((from + PAGE_SIZE - 1) >> PAGE_SIZE_BITS);
 
     if(lock) {
         xcpfs_down_read(&sbi->cp_sem);
@@ -164,9 +170,10 @@ static int xcpfs_do_truncate(struct inode *inode, int from, bool lock) {
     unlock_page(ipage);
     put_page(ipage);
 //TODO:truncate partial block
-    iblock = (pgoff_t)(from >> BLOCK_SIZE_BITS);
-    offset = from - (iblock << BLOCK_SIZE_BITS);
+    iblock = (pgoff_t)(from >> PAGE_SIZE_BITS);
+    offset = from - (iblock << PAGE_SIZE_BITS);
     xcpfs_truncate_partial_block(inode,iblock,offset);
+    invalidate_mapping_pages(inode->i_mapping,from,-1);
 
     if(lock) {
         xcpfs_up_read(&sbi->cp_sem);
@@ -175,13 +182,15 @@ static int xcpfs_do_truncate(struct inode *inode, int from, bool lock) {
 }
 
 int xcpfs_truncate(struct inode *inode) {
+    DEBUG_AT;
     int err;
 
     err = xcpfs_do_truncate(inode,i_size_read(inode),true);
     if(err) {
         return err;
     }
-    inode->i_mtime = inode->i_ctime = current_time(inode);
+    inode->i_mtime = inode->i_atime = current_time(inode);
+    // inode->i_mtime = inode->i_ctime = current_time(inode);
     mark_inode_dirty_sync(inode);
     return 0;
 }

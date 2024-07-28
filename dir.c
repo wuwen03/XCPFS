@@ -52,6 +52,7 @@ const struct file_operations xcpfs_dir_operations = {
 };
 
 static int xcpfs_add_link(struct dentry *dentry, struct inode *inode) {
+    DEBUG_AT;
     struct inode *dir = d_inode(dentry->d_parent);
     struct xcpfs_dentry *de;
     struct page *page;
@@ -69,7 +70,7 @@ static int xcpfs_add_link(struct dentry *dentry, struct inode *inode) {
         if(de->ino == 0 && tar == npages) {
             tar = i;
         }
-        if(namelen == de->namelen && memcmp(name,de->name,namelen)) {
+        if(namelen == de->namelen && strcmp(name,de->name) == 0) {
             unlock_page(page);
             put_page(page);
             return -EEXIST;
@@ -83,11 +84,12 @@ static int xcpfs_add_link(struct dentry *dentry, struct inode *inode) {
     }
     de = (struct xcpfs_dentry *)page_address(page);
     de->ino = inode->i_ino;
-    memcpy(de->name,name,namelen);
+    // memcpy(de->name,name,namelen);
+    strcpy(de->name,name);
     de->namelen = namelen;
     de->ino = inode->i_ino;
     xcpfs_commit_write(page,page_offset(page),PAGE_SIZE);
-    dir->i_mtime = dir->i_ctime = current_time(dir);
+    dir->i_mtime = dir->i_atime = current_time(dir);
     mark_inode_dirty(dir);
     return 0;
 }
@@ -95,25 +97,27 @@ static int xcpfs_add_link(struct dentry *dentry, struct inode *inode) {
 static int xcpfs_mknod(struct mnt_idmap* idmap, struct inode* dir,
     struct dentry* dentry, umode_t mode, dev_t rdev) 
 {
+    DEBUG_AT;
     struct inode *inode;
     int err;
 
     if(!old_valid_dev(rdev)) {
         return -EINVAL;
     }
-    inode = xcpfs_new_inode(dir,mode);
+    inode = xcpfs_new_inode(idmap,dir,mode);
     if(IS_ERR(inode)) {
         return PTR_ERR(inode);
     }
     xcpfs_set_inode(inode);
     mark_inode_dirty(inode);
-    xcpfs_down_read(&XCPFS_SB(inode->i_sb)->cp_sem);
+    xcpfs_down_read(&(XCPFS_SB(inode->i_sb)->cp_sem));
     err = xcpfs_add_link(dentry,inode);
-    xcpfs_up_read(&XCPFS_SB(inode->i_sb)->cp_sem);
+    xcpfs_up_read(&(XCPFS_SB(inode->i_sb)->cp_sem));
     if(!err) {
-        d_instantiate(dentry,inode);
+        d_instantiate_new(dentry,inode);
         return 0;
     }
+    XCPFS_INFO("mknod fail");
     inode_dec_link_count(inode);
     iput(inode);
     return err;
@@ -121,11 +125,13 @@ static int xcpfs_mknod(struct mnt_idmap* idmap, struct inode* dir,
 
 static int xcpfs_create(struct mnt_idmap* idmap, struct inode* dir,
     struct dentry* dentry, umode_t mode, bool excl) {
+    DEBUG_AT;
     return xcpfs_mknod(idmap, dir, dentry, mode, 0);
 }
 
 //return de and locked and referred res_page
 static struct xcpfs_dentry *xcpfs_find_entry(struct dentry* dentry,struct page **res_page) {
+    DEBUG_AT;
     struct page *page;
     struct inode *dir = d_inode(dentry->d_parent);
     struct xcpfs_dentry *de;
@@ -135,17 +141,20 @@ static struct xcpfs_dentry *xcpfs_find_entry(struct dentry* dentry,struct page *
     int i;
     for (i = 0; i < nrpages; i++) {
         page = xcpfs_prepare_page(dir,i,false,false);
-        if(IS_ERR(page)) {
+        if(IS_ERR_OR_NULL(page)) {
             continue;
         }
         de = (struct xcpfs_dentry *)page_address(page);
+        XCPFS_INFO("de->ino:%d de->name:%s",de->ino,de->name);
         if(de->ino == 0) {
             unlock_page(page);
             put_page(page);
             continue;
         }
-        if(de->namelen == namelen && memcmp(de->name,name,namelen)) {
+        if(de->namelen == namelen && strcmp(de->name,name) == 0) {
+            XCPFS_INFO("get entry");
             *res_page = page;
+            XCPFS_INFO("get entry");
             return de;
         }
         unlock_page(page);
@@ -155,6 +164,7 @@ static struct xcpfs_dentry *xcpfs_find_entry(struct dentry* dentry,struct page *
 } 
 
 static uint32_t xcpfs_inode_by_name(struct dentry* dentry) {
+    DEBUG_AT;
     struct page* page;
     struct xcpfs_dentry *de = xcpfs_find_entry(dentry,&page);
     int res;
@@ -170,6 +180,7 @@ static uint32_t xcpfs_inode_by_name(struct dentry* dentry) {
 static struct dentry* xcpfs_lookup(struct inode* dir, struct dentry* dentry,
     unsigned int flags)
 {
+    DEBUG_AT;
     struct inode *inode = NULL;
     int ino;
     if(dentry->d_name.len > XCPFS_MAX_FNAME_LEN) {
@@ -179,6 +190,7 @@ static struct dentry* xcpfs_lookup(struct inode* dir, struct dentry* dentry,
     if(ino) {
         inode = xcpfs_iget(dir->i_sb,ino);
     }
+    XCPFS_INFO("looked up inode : %d",ino);
     return d_splice_alias(inode,dentry);
 }
 
@@ -195,8 +207,8 @@ static int xcpfs_init_dir(struct inode* inode, struct inode* dir) {
             return -ENOMEM;
         }
         if(IS_ERR(page)) {
-            unlock_page(page);
-            put_page(page);
+            // unlock_page(page);
+            // put_page(page);
             return PTR_ERR(page);
         }
         de = (struct xcpfs_dentry *)page_address(page);
@@ -216,9 +228,10 @@ static int xcpfs_init_dir(struct inode* inode, struct inode* dir) {
 static int xcpfs_mkdir(struct mnt_idmap* idmap, struct inode* dir, 
     struct dentry* dentry, umode_t mode)
 {
+    DEBUG_AT;
     struct inode *inode ;
     int err;
-    inode = xcpfs_new_inode(dir,mode | S_IFDIR);
+    inode = xcpfs_new_inode(idmap,dir,mode | S_IFDIR);
     if(IS_ERR(inode)) {
         return PTR_ERR(inode);
     }
@@ -235,7 +248,7 @@ static int xcpfs_mkdir(struct mnt_idmap* idmap, struct inode* dir,
     if(err) {
         goto fail;
     }
-    d_instantiate(dentry,inode);
+    d_instantiate_new(dentry,inode);
     return err;
 fail:
     inode_dec_link_count(inode);
@@ -245,6 +258,8 @@ fail:
 }
 //unlock page
 static int xcpfs_delete_entry(struct xcpfs_dentry* de, struct page* page) {
+    XCPFS_INFO("de ptr:%p page ptr:%p",de,page);
+    DEBUG_AT;
     int index;
     // struct xcpfs_dentry *de;
     struct inode *inode;
@@ -252,37 +267,42 @@ static int xcpfs_delete_entry(struct xcpfs_dentry* de, struct page* page) {
     unlock_page(page);
     page = xcpfs_prepare_page(page->mapping->host,index,true,false);
     if(IS_ERR_OR_NULL(page)) {
-        return PTR_ERR(page);
+        return -EIO;
     }
     de = (struct xcpfs_dentry *)page_address(page);
+    XCPFS_INFO("ino:%d name:%s",de->ino,de->name);
     de->ino = 0;
     de->namelen = 0;
     memset(de->name,0,XCPFS_MAX_FNAME_LEN);
     xcpfs_commit_write(page,page_offset(page),PAGE_SIZE);
     inode = page->mapping->host;
-    inode->i_ctime = inode->i_mtime = current_time(inode);
+    inode->i_mtime = current_time(inode);
     mark_inode_dirty(inode);
     return 0;
 }
 
 static int xcpfs_unlink(struct inode* dir, struct dentry* dentry) {
+    DEBUG_AT;
+    XCPFS_INFO("dir ptr:%p,dentry:%p",dir,dentry);
     int err = -ENOENT;
     struct xcpfs_dentry *de;
     struct page *page;
     struct inode *inode;
     de = xcpfs_find_entry(dentry,&page);
     if(!de) {
+        XCPFS_INFO("debug1")
         return -ENOENT;
     }
-    xcpfs_down_read(&XCPFS_SB(inode->i_sb)->cp_sem);
+    XCPFS_INFO("debug2");
+    xcpfs_down_read(&(XCPFS_SB(dir->i_sb)->cp_sem));
     err = xcpfs_delete_entry(de,page);
-    xcpfs_up_read(&XCPFS_SB(inode->i_sb)->cp_sem);
+    xcpfs_up_read(&(XCPFS_SB(dir->i_sb)->cp_sem));
     put_page(page);
     if(err) {
         return err;
     }
     inode = d_inode(dentry);
-    inode->i_ctime = dir->i_ctime;
+    inode->i_atime = dir->i_atime;
     inode_dec_link_count(inode);
     mark_inode_dirty(inode);
     return err;
@@ -314,6 +334,7 @@ static int xcpfs_empty_dir(struct inode *inode) {
 }
 
 static int xcpfs_rmdir(struct inode* dir, struct dentry* dentry) {
+    DEBUG_AT;
     struct inode *inode = d_inode(dentry);
     int err = -ENOTEMPTY;
     if(!xcpfs_empty_dir(inode)) {
