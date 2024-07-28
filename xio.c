@@ -75,16 +75,10 @@ err:
         unlock_page(xio->page);
         put_page(xio->page);
     }
-    if(xio->unlock) {
-        unlock_page(xio->page);
-        put_page(xio->page);
-    }
     free_xio(xio);
-    bio_put(bio);
     bio_put(bio);
 }
 
-struct xcpfs_io_info *alloc_xio(void) {
 struct xcpfs_io_info *alloc_xio(void) {
     struct xcpfs_io_info *xio;
     xio = (struct xcpfs_io_info *)kzalloc(sizeof(struct xcpfs_io_info),GFP_KERNEL);
@@ -97,7 +91,7 @@ void free_xio(struct xcpfs_io_info *xio) {
 }
 
 static struct bio *__alloc_bio(struct xcpfs_io_info *xio) {
-    XCPFS_INFO("xio->page ptr:0x%p",xio->page);
+    // XCPFS_INFO("xio->page ptr:0x%p",xio->page);
     struct bio *bio;
     bio = bio_alloc(xio->sbi->sb->s_bdev,1,xio->op | xio->op_flags,GFP_NOIO);
     bio = bio_alloc(xio->sbi->sb->s_bdev,1,xio->op | xio->op_flags,GFP_NOIO);
@@ -112,13 +106,13 @@ static struct bio *__alloc_bio(struct xcpfs_io_info *xio) {
     if(xio->op == REQ_OP_READ) {
         bio->bi_end_io = xcpfs_read_end_io;
     } else {
-        XCPFS_INFO("xio->page ptr:0x%p",xio->page);
+        // XCPFS_INFO("xio->page ptr:0x%p",xio->page);
         XCPFS_INFO("inode ino:%d page index:%d",xio->page->mapping->host->i_ino,page_to_index(xio->page));
-        XCPFS_INFO("page ref:%d",page_ref_count(xio->page));
+        // XCPFS_INFO("page ref:%d",page_ref_count(xio->page));
         // set_page_writeback(xio->page);
         bio->bi_end_io = xcpfs_write_end_io;
     }
-    XCPFS_INFO("out alloc bio");
+    // XCPFS_INFO("out alloc bio");
     return bio;
 }
 
@@ -143,20 +137,8 @@ static int submit_node_xio(struct xcpfs_io_info *xio) {
     //     }
     //     xio->page = page;
     // }
-    // if(!xio->page) {   
-    //     if(xio->op == REQ_OP_READ) {
-    //         page = grab_cache_page(mapping,xio->ino);
-    //         if(PageUptodate(page)) {
-    //             return page;
-    //         }
-    //     } else {
-    //         page = grab_cache_page_write_begin(mapping,xio->ino);
-    //     }
-    //     xio->page = page;
-    // }
     page = xio->page;
     if(page == NULL) {
-        return -EIO;
         return -EIO;
     }
 
@@ -189,7 +171,6 @@ static int submit_data_xio(struct xcpfs_io_info *xio) {
     struct inode *inode = xcpfs_iget(sbi->sb,xio->ino);
     struct address_space *mapping = inode->i_mapping;
     struct page *page, *dpage;
-    struct page *page, *dpage;
     struct bio *bio;
     struct nat_entry *ne;
     int offset[5] = {-1,-1,-1,-1,-1};
@@ -206,10 +187,7 @@ static int submit_data_xio(struct xcpfs_io_info *xio) {
     len = get_path(offset,xio->iblock);
     dpage = get_dnode_page(page,false,NULL);
     if(IS_ERR_OR_NULL(dpage)) {
-        return PTR_ERR(dpage);
-    len = get_path(offset,xio->iblock);
-    dpage = get_dnode_page(page,false,NULL);
-    if(IS_ERR_OR_NULL(dpage)) {
+        end_page_writeback(xio->page);
         return PTR_ERR(dpage);
     }
     

@@ -12,20 +12,6 @@ void init_cp_block(struct cp_block *cpsb, struct xcpfs_sb_info *sbi) {
     cpsb->raw_sb.ssa_page_count = sbi->ssa_page_count;
 }
 
-#include"xcpfs.h"
-
-void init_cp_block(struct cp_block *cpsb, struct xcpfs_sb_info *sbi) {
-    memset(cpsb,0,PAGE_SIZE);
-    cpsb->cnt = 0;
-    cpsb->raw_sb.magic = XCPFS_MAGIC;
-    cpsb->raw_sb.meta_ino = sbi->meta_ino;
-    cpsb->raw_sb.node_ino = sbi->node_ino;
-    cpsb->raw_sb.root_ino = sbi->root_ino;
-    cpsb->raw_sb.nat_page_count = sbi->nat_page_count;
-    cpsb->raw_sb.zit_page_count = sbi->zit_page_count;
-    cpsb->raw_sb.ssa_page_count = sbi->ssa_page_count;
-}
-
 //将meta inode代表的元数据和超级块下刷
 int do_checkpoint(struct super_block *sb) {
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
