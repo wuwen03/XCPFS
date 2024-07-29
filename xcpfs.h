@@ -319,6 +319,7 @@ struct xcpfs_io_info {
 	block_t new_blkaddr;
 
     struct page *page; //locked page 
+	struct page *dpage;//for end_io of writing data block
     struct writeback_control *wbc;
 
     enum req_op op;

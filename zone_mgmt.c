@@ -73,6 +73,7 @@ static int remove_zone_active(struct super_block *sb,struct xcpfs_zone_info *tar
 }
 
 static int xcpfs_zone_open(struct super_block *sb,int zone_id) {
+    DEBUG_AT;
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_zone_info *zi;
@@ -91,7 +92,9 @@ static int xcpfs_zone_open(struct super_block *sb,int zone_id) {
         ret = -EMAXACTIVE;
         goto out;
     }
+    // preempt_disable();
     ret = blkdev_zone_mgmt(sb->s_bdev,REQ_OP_ZONE_OPEN,zi->start,zm->zone_size,GFP_NOFS);
+    // preempt_enable();
     if (ret) {
         XCPFS_INFO("open zone error:%d",zone_id);
         goto out;
@@ -106,6 +109,7 @@ out:
 }
 
 static int xcpfs_zone_close(struct super_block *sb,int zone_id) {
+    DEBUG_AT;
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_zone_info *zi;
@@ -127,6 +131,7 @@ out:
 }
 
 static int xcpfs_zone_finish(struct super_block *sb, int zone_id) {
+    DEBUG_AT;
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_zone_info *zi;
@@ -150,6 +155,7 @@ out:
 }
 
 static int xcpfs_zone_reset(struct super_block *sb, int zone_id) {
+    DEBUG_AT;
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_zone_info *zi;
@@ -170,7 +176,7 @@ out:
 }
 
 int xcpfs_zone_mgmt(struct super_block *sb,int zone_id,enum req_op op) {
-
+    DEBUG_AT;
     int ret;
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     spin_lock(&sbi->zm->zm_info_lock);
@@ -203,7 +209,7 @@ int validate_blkaddr(struct super_block *sb, block_t blkaddr) {
     struct xcpfs_zone_info *zi;
     int zone_id;
     int idx;
-    return 0;
+    return 0; //TODO
     zone_id = blkaddr / (zm->zone_size >> PAGE_SECTORS_SHIFT);
     idx = blkaddr % (zm->zone_size >> PAGE_SECTORS_SHIFT);
     
@@ -248,7 +254,7 @@ static int get_empty_zone(struct super_block *sb) {
     int i;
     for(i = 2; i < zm->nr_zones; i++) {
         zi = &zm->zone_info[i];
-        if(zi->cond = BLK_ZONE_COND_EMPTY) {
+        if(zi->cond == BLK_ZONE_COND_EMPTY) {
             return zi->zone_id;
         }
     }

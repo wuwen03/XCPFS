@@ -39,11 +39,12 @@ static void xcpfs_write_end_io(struct bio *bio) {
         //TODO
         // DEBUG_AT;
         XCPFS_INFO("update dnode index");
-        dpage = get_dnode_page(xio->page,false,NULL);
-        if(IS_ERR_OR_NULL(dpage)) {
-            XCPFS_INFO("dpage not exists");
-            goto err;
-        }
+        // dpage = get_dnode_page(xio->page,false,NULL);
+        // if(IS_ERR_OR_NULL(dpage)) {
+        //     XCPFS_INFO("dpage not exists");
+        //     goto err;
+        // }
+        dpage = xio->dpage;
         node = (struct xcpfs_node *)page_address(dpage);
         len = get_path(offset,page_index(xio->page));
         // for(i = 0; i < 4; i++) {
@@ -63,7 +64,8 @@ static void xcpfs_write_end_io(struct bio *bio) {
         } else {
             node->dn.addr[offset[len]] = bio->bi_iter.bi_sector >> PAGE_SECTORS_SHIFT;
         }
-        SetPageDirty(dpage);
+        // SetPageDirty(dpage);
+        set_page_dirty(dpage);
         unlock_page(dpage);
         put_page(dpage);
     }
@@ -83,7 +85,6 @@ struct xcpfs_io_info *alloc_xio(void) {
     struct xcpfs_io_info *xio;
     xio = (struct xcpfs_io_info *)kzalloc(sizeof(struct xcpfs_io_info),GFP_KERNEL);
     return xio;
-    return xio;
 }
 
 void free_xio(struct xcpfs_io_info *xio) {
@@ -93,7 +94,6 @@ void free_xio(struct xcpfs_io_info *xio) {
 static struct bio *__alloc_bio(struct xcpfs_io_info *xio) {
     // XCPFS_INFO("xio->page ptr:0x%p",xio->page);
     struct bio *bio;
-    bio = bio_alloc(xio->sbi->sb->s_bdev,1,xio->op | xio->op_flags,GFP_NOIO);
     bio = bio_alloc(xio->sbi->sb->s_bdev,1,xio->op | xio->op_flags,GFP_NOIO);
     bio_add_page(bio,xio->page,PAGE_SIZE,0);
     bio->bi_private = xio;
@@ -146,7 +146,7 @@ static int submit_node_xio(struct xcpfs_io_info *xio) {
     if(ne) {
         xio->old_blkaddr = ne->block_addr;
     }
-    if(ne->block_addr == 0) {
+    if(ne->block_addr == 0 && xio->op == REQ_OP_READ) {
         if(!PageUptodate(page)) {
             zero_user_segment(page,0,PAGE_SIZE);
         }
@@ -198,8 +198,13 @@ static int submit_data_xio(struct xcpfs_io_info *xio) {
     } else {
         xio->old_blkaddr = node->dn.addr[offset[len]];
     }
-    unlock_page(dpage);
-    put_page(dpage);
+    if(xio->op == REQ_OP_READ) {
+        unlock_page(dpage);
+        put_page(dpage);
+    } else {
+        xio->dpage = dpage;
+        wait_on_page_writeback(dpage);
+    }
     XCPFS_INFO("data mapping_use_writeback_tags:%d",mapping_use_writeback_tags(mapping))
     alloc_zone(xio);
     bio = __alloc_bio(xio);

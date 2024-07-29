@@ -156,6 +156,9 @@ static int xcpfs_fill_super(struct super_block* sb, void* data, int silent) {
 
     sbi->zm = kmalloc(sizeof(struct xcpfs_zm_info),GFP_KERNEL);
     err = xcpfs_init_zm_info(sb);
+    sbi->zm->zone_info[3].zone_type = ZONE_TYPE_META_NODE;
+    sbi->zm->zone_info[5].zone_type = ZONE_TYPE_NODE;
+    sbi->zm->zone_info[6].zone_type = ZONE_TYPE_DATA;
 
     if(err) {
         XCPFS_INFO("err after init_zm_info");

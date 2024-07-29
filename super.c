@@ -26,7 +26,7 @@ static void xcpfs_evict_inode(struct inode *inode) {
     // struct xcpfs_inode_info *xi = (struct xcpfs_inode_info *)inode;
     struct xcpfs_sb_info *sbi = XCPFS_SB(inode->i_sb);
     struct inode *node_inode = sbi->node_inode;
-    int i;
+    // int i;
     if(inode->i_ino <= 2) {
         truncate_inode_pages_final(inode->i_mapping);
         clear_inode(inode);
@@ -147,15 +147,34 @@ static void xcpfs_put_super(struct super_block* sb) {
 static int xcpfs_statfs(struct dentry* dentry, struct kstatfs* buf) {
     struct super_block *sb = dentry->d_inode->i_sb;
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
+    struct xcpfs_zm_info *zm = sbi->zm;
+    struct xcpfs_zone_info *zi;
     struct nat_entry *ne;
     struct inode *inode;
+    int i = 0;
+    
+    XCPFS_INFO("-------DUMP STATISTICS--------");
+    XCPFS_INFO("-----nat info------");
     list_for_each_entry(ne,&sbi->nm->nat_list,nat_link) {
         XCPFS_INFO("nid:%d addr:0x%x ino:%d",ne->nid,ne->block_addr,ne->ino);
     }
+    XCPFS_INFO("-----nat info------");
+    XCPFS_INFO("----inode inf------")
     list_for_each_entry(inode,&sb->s_inodes,i_sb_list) {
         XCPFS_INFO("ino:%d i_nlink:%d i_count:%d",
                         inode->i_ino,inode->i_nlink,inode->i_count);
     }
+    XCPFS_INFO("----inode inf------");
+    XCPFS_INFO("----zone info------");
+    for(zi = zm->zone_active[i = 0]; i < zm->max_active_zones; zi = zm->zone_active[++i]) {
+        if(zi == NULL) {
+            continue;
+        }
+        XCPFS_INFO("zoneid:%d start:%x wp:%x cond:%d type:%d",zi->zone_id,zi->start,zi->wp,zi->cond,zi->zone_type);
+    }
+    XCPFS_INFO("----zone info------");
+    XCPFS_INFO("-------DUMP STATISTICS--------");
+    
     return 0;
 }
 

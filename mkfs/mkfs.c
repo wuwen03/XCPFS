@@ -142,7 +142,7 @@ int main() {
     sb->meta_nat[1].nid = sb->meta_ino;
     sb->meta_nat[1].ne.ino = sb->meta_ino;
     sb->meta_nat[1].ne.block_addr = init_meta();
-
+    zone_mgmt(0,NULL,NVME_ZNS_ZSA_OPEN);
     ret = zone_append(0,&result,sb);
     printf("ret:0x%x result:0x%x\n",ret,result);
     return 0;
