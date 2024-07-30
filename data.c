@@ -49,6 +49,7 @@ int xcpfs_append_page(struct super_block *sb, struct page *page, int zone_id) {
     if(ret) {
         goto free_page;
     }
+    return 0;
 free_page:
     __free_page(page);
     return ret;
@@ -183,6 +184,8 @@ int __commit_write(struct page *page, int pos, int copied, bool locked) {
             i_size_write(inode,pos+copied);
             mark_inode_dirty_sync(inode);
         }
+    } else {
+        mark_inode_dirty_sync(inode);
     }
     unlock_page(page);
     put_page(page);

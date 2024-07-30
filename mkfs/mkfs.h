@@ -10,7 +10,7 @@
 #define PAGE_SIZE_BITS 12
 // #define BLOCKS_PER_ZONE 
 #define PAGE_SIZE 4096
-#define XCPFS_MAGIC 0x52064
+#define XCPFS_MAGIC 0x520264
 typedef int block_t; /*block地址*/
 typedef int nid_t;
 
@@ -33,6 +33,7 @@ struct xcpfs_super_block {
 	__le32 nat_page_count;
 	__le32 zit_page_count;
 	__le32 ssa_page_count;
+	__le16 meta_nat_cnt;
 	//inode(1),direct(2),indirect(2),double_indirect(1)
 	struct xcpfs_nat_entry_sb meta_nat[];
 } __packed;

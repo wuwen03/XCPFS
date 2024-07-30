@@ -92,9 +92,9 @@ static int xcpfs_zone_open(struct super_block *sb,int zone_id) {
         ret = -EMAXACTIVE;
         goto out;
     }
-    // preempt_disable();
+    preempt_disable();
     ret = blkdev_zone_mgmt(sb->s_bdev,REQ_OP_ZONE_OPEN,zi->start,zm->zone_size,GFP_NOFS);
-    // preempt_enable();
+    preempt_enable();
     if (ret) {
         XCPFS_INFO("open zone error:%d",zone_id);
         goto out;
@@ -126,6 +126,7 @@ static int xcpfs_zone_close(struct super_block *sb,int zone_id) {
     }
     remove_zone_opened(sb,zi);
     zi->cond = BLK_ZONE_COND_CLOSED;
+    zi->dirty = true;
 out:
     return ret;
 }
@@ -150,6 +151,7 @@ static int xcpfs_zone_finish(struct super_block *sb, int zone_id) {
     remove_zone_active(sb,zi);
     zi->cond = BLK_ZONE_COND_FULL;
     zi->wp = zm->zone_capacity;
+    zi->dirty = true;
 out:
     return ret;
 }
@@ -164,6 +166,7 @@ static int xcpfs_zone_reset(struct super_block *sb, int zone_id) {
     ret = -EZONE;
     zi = &zm->zone_info[zone_id];
     ret = blkdev_zone_mgmt(sb->s_bdev,REQ_OP_ZONE_RESET,zi->start,zm->zone_size,GFP_NOFS);
+
     if(ret) {
         goto out;
     }
@@ -171,6 +174,7 @@ static int xcpfs_zone_reset(struct super_block *sb, int zone_id) {
     remove_zone_active(sb,zi);
     zi->cond = BLK_ZONE_COND_EMPTY;
     zi->wp = 0;
+    zi->dirty = true;
 out:
     return ret;
 }
@@ -323,10 +327,13 @@ void alloc_zone(struct xcpfs_io_info *xio) {
         xio->new_blkaddr = zm->zone_info[zone_id].start >> PAGE_SECTORS_SHIFT;
         invalidate_blkaddr(sbi->sb,xio->old_blkaddr);
         spin_unlock(&zm->zm_info_lock);
-        XCPFS_INFO("write op zslba:0x%x",xio->new_blkaddr);
+        XCPFS_INFO("write op zoneid:%d zslba:0x%x",zone_id,xio->new_blkaddr);
     }
 }
 
-int flush_dirty_nat(struct xcpfs_sb_info *sbi) {
+int flush_dirty_nat(struct super_block *sb) {
+    struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
+    struct xcpfs_zm_info *zm = sbi->zm;
+    
     return 0;
 }

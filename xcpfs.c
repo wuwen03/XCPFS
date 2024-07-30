@@ -44,7 +44,7 @@ static int xcpfs_report_zones_cb(struct blk_zone *zone, unsigned int idx, void *
     return 0;
 }
 
-//初始化部分的
+//初始化部分的zit
 static int xcpfs_init_zm_info(struct super_block *sb) {
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
@@ -66,7 +66,7 @@ static int xcpfs_init_zm_info(struct super_block *sb) {
     XCPFS_INFO("ret:%d",ret);
     return 0;
 }
-
+//初始化部分nat
 static int xcpfs_init_nat_info(struct super_block *sb) {
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_nat_info *nm = sbi->nm;
@@ -78,7 +78,7 @@ static int xcpfs_init_nat_info(struct super_block *sb) {
     INIT_LIST_HEAD(&nm->cp_nat);
     return 0;
 }
-
+//读取super block 并且填充meta nat
 static int xcpfs_read_super(struct super_block *sb) {
     DEBUG_AT;
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
@@ -122,7 +122,7 @@ static int xcpfs_read_super(struct super_block *sb) {
     sbi->ssa_page_count = raw_super->ssa_page_count;
     sbi->total_meta_paga_count = sbi->nat_page_count + sbi->zit_page_count + sbi->ssa_page_count;
 
-    for(i = 0; i < 6; i++) {
+    for(i = 0; i < raw_super->meta_nat_cnt; i++) {
         ne = &raw_super->meta_nat[i];
         if(ne->nid == 0) {
             continue;
@@ -135,9 +135,37 @@ free_page:
     return ret;
 }
 
-static void xcpfs_get_zit_info(struct super_block *sb) {
 //TODO
-    
+static void xcpfs_get_zit_info(struct super_block *sb) {
+    DEBUG_AT;
+    struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
+    struct xcpfs_zm_info *zm = sbi->zm;
+    struct xcpfs_zit_block *raw_zit;
+    struct xcpfs_zit_entry *ze;
+    struct xcpfs_zone_info *zi;
+    struct page *page;
+    int iblock, i, j;
+    for(i = 0; i < DIV_ROUND_UP(zm->nr_zones,ZIT_ENTRY_PER_BLOCK); i ++) {
+        iblock = i + ZIT_START;
+        page = xcpfs_prepare_page(sbi->meta_inode,iblock,false,false);
+        if(IS_ERR_OR_NULL(page)) {
+            continue;
+        }
+        raw_zit =(struct xcpfs_zit_block *)page_address(page);
+        ze = raw_zit->entries;
+        for(j = 0; j < ZIT_ENTRY_PER_BLOCK; j ++) {
+            if(i * ZIT_ENTRY_PER_BLOCK + j == zm->nr_zones) {
+                break;
+            }
+            zi = &zm->zone_info[i * ZIT_ENTRY_PER_BLOCK + j];
+            zi->zone_type = ze[j].zone_type;
+            zi->vblocks = ze[j].vblocks;
+            memcpy(zi->valid_map,ze->valid_map,ZONE_VALID_MAP_SIZE);
+            zi->dirty = true;
+        }
+        unlock_page(page);
+        put_page(page);
+    }
 }
 
 static int xcpfs_fill_super(struct super_block* sb, void* data, int silent) {
@@ -170,22 +198,29 @@ static int xcpfs_fill_super(struct super_block* sb, void* data, int silent) {
 
     xcpfs_read_super(sb);
 
-    // sbi->node_ino = 2;
     sbi->node_inode = xcpfs_iget(sb,sbi->node_ino);
     if(!sbi->node_inode) {
         XCPFS_INFO("node inode error");
         return -EIO;
     }
-    
-    // sbi->meta_ino = 1;
     sbi->meta_inode = xcpfs_iget(sb,sbi->meta_ino);
-
+    if(!sbi->meta_inode) {
+        XCPFS_INFO("meta inode error");
+        return -EIO;
+    }
     root_inode = xcpfs_iget(sb,sbi->root_ino);
+    if(!root_inode) {
+        XCPFS_INFO("root inode error");
+        return -EIO;
+    }
+    
+    xcpfs_get_zit_info(sb);
+
+
     sb->s_op = &xcpfs_sops;
     sb->s_root = d_make_root(root_inode);
 
     sbi->cp_phase = 0;
-    // xcpfs_get_zit_info(sb);
     //TODO
     return 0;
 }
@@ -201,6 +236,7 @@ static struct dentry* xcpfs_mount(struct file_system_type* fs_type, int flags,
 static void kill_xcpfs_super(struct super_block* sb) {
     DEBUG_AT;
     struct inode *inode;
+    struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     if(!sb) {
         return;
     }
@@ -208,7 +244,15 @@ static void kill_xcpfs_super(struct super_block* sb) {
         XCPFS_INFO("ino:%d i_nlink:%d i_count:%d",
                         inode->i_ino,inode->i_nlink,inode->i_count);
     }
+    do_checkpoint(sb);
+    XCPFS_INFO("----------after check point---------");
+    iput(sbi->meta_inode);
+    iput(sbi->node_inode);
     kill_block_super(sb);
+    list_for_each_entry(inode,&sb->s_inodes,i_sb_list) {
+        XCPFS_INFO("ino:%d i_nlink:%d i_count:%d",
+                        inode->i_ino,inode->i_nlink,inode->i_count);
+    }
 }
 struct file_system_type xcpfs_fs_type = {
     .owner = THIS_MODULE,

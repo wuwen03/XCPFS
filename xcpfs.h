@@ -46,7 +46,7 @@ do{\
 #define PAGE_SIZE_BITS 12
 // #define BLOCKS_PER_ZONE 
 // #define PAGE_SIZE 4096
-#define XCPFS_MAGIC 0x52064
+#define XCPFS_MAGIC 0x520264
 typedef int block_t; /*block地址*/
 typedef int nid_t;
 
@@ -71,6 +71,7 @@ struct xcpfs_super_block {
 	__le32 nat_page_count;
 	__le32 zit_page_count;
 	__le32 ssa_page_count;
+	__le16 meta_nat_cnt;
 	//inode(1),direct(2),indirect(2),double_indirect(1)
 	struct xcpfs_nat_entry_sb meta_nat[];
 } __packed;
@@ -187,12 +188,12 @@ struct xcpfs_summary_block {
 
 struct xcpfs_zone_info {
 	
+	int zone_id;
 	enum blk_zone_cond cond;
 	sector_t wp;
 	sector_t start;
 	
 	bool dirty;
-	int zone_id;
 	uint8_t zone_type;
 	int vblocks;
 	unsigned long *valid_map;
@@ -233,11 +234,11 @@ struct xcpfs_nat_info {
 	struct list_head free_nat;
 	struct list_head cp_nat;
 };
-
+//下面的分割的单位是block
 #define REG_NAT_START 6000
 #define ZIT_START 600000
 #define SSA_START 800000
-struct cp_block;
+struct xcpfs_cpc;
 struct xcpfs_sb_info {
 	struct super_block *sb;
 	// struct xcpfs_zone_device_info *zone_device_info;
@@ -262,7 +263,7 @@ struct xcpfs_sb_info {
 
 	struct xcpfs_rwsem cp_sem;
 	int cp_phase;
-	struct cp_block *cpsb;
+	struct xcpfs_cpc *cpc;
 };
 
 
@@ -290,6 +291,8 @@ int update_nat(struct super_block *sb, int nid,int new_blkaddr,bool pinned);
 struct nat_entry *lookup_nat(struct super_block *sb, int nid);
 struct nat_entry *alloc_free_nat(struct super_block *sb,bool is_meta);
 int invalidate_nat(struct super_block *sb, int nid);
+int flush_nat(struct super_block *sb);
+int cp_append_nat(struct super_block *sb,struct nat_entry *ne);
 
 /*xio.c*/
 enum page_type {
@@ -366,9 +369,10 @@ extern const struct file_operations xcpfs_file_operations;
 extern const struct inode_operations xcpfs_file_inode_operations;
 
 /*checkpoint.c*/
-struct cp_block {
-	int cnt;
-	struct xcpfs_super_block raw_sb;
+struct xcpfs_cpc {
+	int nat_ptr;
+	struct page *page;
+	struct xcpfs_super_block *raw_sb;
 };
 
 int do_checkpoint(struct super_block *sb);
@@ -384,5 +388,6 @@ extern const struct file_operations xcpfs_dir_operations;
 extern const struct inode_operations xcpfs_dir_inode_operations;
 
 /*super.*/
+void dump_fs(struct super_block *sb);
 extern const struct super_operations xcpfs_sops;
 #endif

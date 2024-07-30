@@ -91,23 +91,29 @@ static int xcpfs_write_data_page(struct page *page, struct writeback_control *wb
     struct inode *inode = page->mapping->host;
     struct xcpfs_sb_info *sbi = XCPFS_SB(inode->i_sb);
     struct xcpfs_io_info *xio;
+    struct folio *folio = page_folio(page);
     int ret = -EAGAIN, index = page_to_index(page);
     XCPFS_INFO("write data page:inode ino:%d page index:%d",inode->i_ino,page_to_index(page));
-    if(!PageDirty(page)) {
+    // if(folio_test_dirty(folio) == false && wbc->sync_mode == WB_SYNC_NONE) {
+    //     XCPFS_INFO("page not dirty");
+    //     ret = 0;
+    //     folio_redirty_for_writepage(wbc,folio);
+    //     goto out;
+    // }
+    //对于node inode的meta node部分
+    if(inode->i_ino == 2 && index < REG_NAT_START * NAT_ENTRY_PER_BLOCK &&
+              sbi->cp_phase != 1 && wbc->sync_mode == WB_SYNC_NONE) {
+        // ret = AOP_WRITEPAGE_ACTIVATE;
         ret = 0;
-        XCPFS_INFO("page not dirty");
-        // goto out;
-    }
-    if(inode->i_ino == 2 && index < REG_NAT_START && sbi->cp_phase != 1 && wbc->sync_mode == WB_SYNC_NONE) {
-        ret = 0;
+        folio_redirty_for_writepage(wbc,folio);
         goto out;
     }
     ret = write_single_page(page,wbc);
+    SetPageUptodate(page);
     // put_page(page);
 out:
     unlock_page(page);
-    ClearPageDirty(page);
-    SetPageUptodate(page);
+    // ClearPageDirty(page);
     return ret;
 }
 

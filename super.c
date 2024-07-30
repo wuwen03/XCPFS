@@ -34,7 +34,7 @@ static void xcpfs_evict_inode(struct inode *inode) {
     }
     truncate_inode_pages_final(inode->i_mapping);
     sync_inode_metadata(inode,0);
-    if(!inode->i_link) {
+    if(!inode->i_nlink) {
         inode->i_size = 0;
         xcpfs_truncate(inode);
         invalidate_mapping_pages(node_inode->i_mapping,inode->i_ino,inode->i_ino);
@@ -85,16 +85,16 @@ static void flush_super_block(struct super_block *sb) {
     struct xcpfs_zone_info *zone0,*zone1;
     int zone_id;
 
-    page = alloc_page(GFP_KERNEL);
-    raw_super = (struct xcpfs_super_block *)page_address(page);
-    raw_super->magic = XCPFS_MAGIC;
-    raw_super->meta_ino = 1;
-    raw_super->node_ino = 2;
-    raw_super->root_ino = 3;
-    raw_super->nat_page_count = sbi->nat_page_count;
-    raw_super->zit_page_count = sbi->zit_page_count;
-    raw_super->ssa_page_count = sbi->ssa_page_count;
-
+    // page = alloc_page(GFP_KERNEL);
+    // raw_super = (struct xcpfs_super_block *)page_address(page);
+    // raw_super->magic = XCPFS_MAGIC;
+    // raw_super->meta_ino = 1;
+    // raw_super->node_ino = 2;
+    // raw_super->root_ino = 3;
+    // raw_super->nat_page_count = sbi->nat_page_count;
+    // raw_super->zit_page_count = sbi->zit_page_count;
+    // raw_super->ssa_page_count = sbi->ssa_page_count;
+    page = sbi->cpc->page;
     zone0 = &zm->zone_info[0],zone1 = &zm->zone_info[1];
     if(zone0->cond == BLK_ZONE_COND_EMPTY) {
         // zone_id = sector_to_block(zone1->wp);
@@ -130,6 +130,8 @@ static void xcpfs_put_super(struct super_block* sb) {
 
     // iput(sbi->node_inode);
 
+    dump_fs(sb);
+
     sb->s_fs_info = NULL;
 
     //free zm
@@ -143,9 +145,8 @@ static void xcpfs_put_super(struct super_block* sb) {
 
     kfree(sbi);
 }
-//just for debug
-static int xcpfs_statfs(struct dentry* dentry, struct kstatfs* buf) {
-    struct super_block *sb = dentry->d_inode->i_sb;
+
+void dump_fs(struct super_block *sb) {
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_zone_info *zi;
@@ -161,8 +162,8 @@ static int xcpfs_statfs(struct dentry* dentry, struct kstatfs* buf) {
     XCPFS_INFO("-----nat info------");
     XCPFS_INFO("----inode inf------")
     list_for_each_entry(inode,&sb->s_inodes,i_sb_list) {
-        XCPFS_INFO("ino:%d i_nlink:%d i_count:%d",
-                        inode->i_ino,inode->i_nlink,inode->i_count);
+        XCPFS_INFO("ino:%d i_nlink:%d i_count:%d nrpages:%d",
+                        inode->i_ino,inode->i_nlink,inode->i_count,inode->i_mapping->nrpages);
     }
     XCPFS_INFO("----inode inf------");
     XCPFS_INFO("----zone info------");
@@ -174,7 +175,13 @@ static int xcpfs_statfs(struct dentry* dentry, struct kstatfs* buf) {
     }
     XCPFS_INFO("----zone info------");
     XCPFS_INFO("-------DUMP STATISTICS--------");
+}
+
+//just for debug
+static int xcpfs_statfs(struct dentry* dentry, struct kstatfs* buf) {
+    struct super_block *sb = dentry->d_inode->i_sb;
     
+    dump_fs(sb);
     return 0;
 }
 

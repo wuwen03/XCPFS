@@ -134,6 +134,7 @@ int main() {
     sb->nat_page_count = 1;
     sb->zit_page_count = 1;
     sb->ssa_page_count = 1;
+    sb->meta_nat_cnt = 2;
 
     sb->meta_nat[0].nid = sb->root_ino;
     sb->meta_nat[0].ne.ino = sb->root_ino;
