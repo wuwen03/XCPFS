@@ -18,8 +18,9 @@ static int xcpfs_recurse(struct inode *inode, int offset[4] ,int depth, int nid)
         }
         len ++;
     }
-    page = get_node_page(sb,nid,false);
-    wait_for_stable_page(page);
+    // page = get_node_page(sb,nid,false);
+    // wait_for_stable_page(page);
+    page = get_node_page_for_wb(sb,nid,false);
     node = (struct xcpfs_node *)page_address(page);
     if(depth == 0) {//to be fixed
         dn = &node->dn;
@@ -56,8 +57,9 @@ static int xcpfs_recurse(struct inode *inode, int offset[4] ,int depth, int nid)
         set_page_dirty(page);
         // SetPageDirty(page);
     }
-    unlock_page(page);
-    put_page(page);
+    // unlock_page(page);
+    // put_page(page);
+    xcpfs_commit_write(page,page_offset(page),PAGE_SIZE);
     return 0;
 }
 
@@ -168,8 +170,9 @@ static int xcpfs_do_truncate(struct inode *inode, int from, bool lock) {
 
     xcpfs_truncate_blocks(inode,ipage,free_from);
     
-    unlock_page(ipage);
-    put_page(ipage);
+    // unlock_page(ipage);
+    // put_page(ipage);
+    xcpfs_commit_write(ipage,page_offset(ipage),PAGE_SIZE);
 //TODO:truncate partial block
     iblock = (pgoff_t)(from >> PAGE_SIZE_BITS);
     offset = from - (iblock << PAGE_SIZE_BITS);
@@ -186,7 +189,7 @@ int xcpfs_truncate(struct inode *inode) {
     DEBUG_AT;
     int err;
 
-    err = xcpfs_do_truncate(inode,i_size_read(inode),true);
+    err = xcpfs_do_truncate(inode,i_size_read(inode),false);
     if(err) {
         return err;
     }

@@ -74,6 +74,15 @@ struct page *get_node_page(struct super_block *sb,nid_t nid,bool create) {
     return page;
 }
 
+struct page *get_node_page_for_wb(struct super_block *sb,nid_t nid,bool create) {
+    XCPFS_INFO("nid:%d create:%d",nid,create);
+    struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
+    struct inode *node_inode = sbi->node_inode;
+    struct page *page;
+    page = __prepare_page(node_inode,nid,true,create,false);
+    return page;
+}
+
 /*
 page: data page
 return locked page
@@ -150,6 +159,7 @@ struct page *get_dnode_page(struct page *page,bool create, bool *need) {
             ne = alloc_free_nat(sb,is_meta);
             lock_page(pages[i]);
             wait_for_stable_page(pages[i]);
+            // wait_on_page_writeback(pages[i]);
             if(i == 0) {
                 node->i.i_nid[offset[0] - DEF_ADDRS_PER_INODE] = ne->nid;
             } else {

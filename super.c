@@ -62,10 +62,11 @@ static int xcpfs_write_inode(struct inode *inode, struct writeback_control *wbc)
         XCPFS_INFO("fail to get inode page:ino %d",inode->i_ino);
         return -EIO;
     }
-    if(wbc->sync_mode == WB_SYNC_NONE) {
+    if(wbc->sync_mode == WB_SYNC_ALL) {
         XCPFS_INFO("writing inode ino:%d page ptr:0x%p",inode->i_ino,page);
         XCPFS_INFO("page index:%d refcount:%d",page_to_index(page),page_ref_count(page));
         write_single_page(page,wbc);
+        wait_on_page_writeback(page);
         get_page(page);//为了实现方便
     }
     unlock_page(page);
@@ -136,7 +137,8 @@ static void xcpfs_put_super(struct super_block* sb) {
 
     //free zm
     for(i = 0; i < zm->nr_zones; i++) {
-        kfree(zm->zone_info->valid_map);
+        if(!zm->zone_info[i].valid_map) continue;
+        kfree(zm->zone_info[i].valid_map);
     }
     kfree(zm->zone_info);
     kfree(zm->zone_opened);
@@ -144,16 +146,15 @@ static void xcpfs_put_super(struct super_block* sb) {
     kfree(zm);
 
     //free nm
-    while(list_empty(&nm->nat_list)) {
+    while(!list_empty(&nm->nat_list)) {
         ne = list_first_entry(&nm->nat_list,struct nat_entry,nat_link);
         list_del(&ne->nat_link);
     }
-    while(list_empty(&nm->free_nat)) {
+    while(!list_empty(&nm->free_nat)) {
         ne = list_first_entry(&nm->free_nat,struct nat_entry,nat_link);
         list_del(&ne->nat_link);
     }
     kfree(nm);
-
     if(sbi->cpc) {
         kfree(sbi->cpc);
     }

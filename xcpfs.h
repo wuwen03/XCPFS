@@ -354,6 +354,7 @@ struct inode *xcpfs_new_inode(struct mnt_idmap *idmap,const struct inode *dir,um
 enum page_type get_page_type(struct xcpfs_sb_info *sbi,int ino, loff_t iblock);
 int get_path(int offset[4], int iblock);
 struct page *get_node_page(struct super_block *sb,nid_t nid,bool create);
+struct page *get_node_page_for_wb(struct super_block *sb,nid_t nid,bool create);
 struct page *get_dnode_page(struct page *page,bool create,bool *need);
 
 /*data.c*/

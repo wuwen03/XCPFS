@@ -111,6 +111,7 @@ static int xcpfs_write_data_page(struct page *page, struct writeback_control *wb
         goto out;
     }
     ret = write_single_page(page,wbc);
+    wait_on_page_writeback(page);
     SetPageUptodate(page);
     // put_page(page);
 out:

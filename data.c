@@ -218,6 +218,7 @@ int do_write_single_page(struct page *page,struct writeback_control *wbc) {
     xio->type = get_page_type(xio->sbi,xio->ino,xio->iblock);
     xio->page = page;
     // xio->unlock = true;
+    xio->unlock = false;
     ret= xcpfs_submit_xio(xio);
     return ret;
 }

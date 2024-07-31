@@ -202,8 +202,8 @@ int xcpfs_zone_mgmt(struct super_block *sb,int zone_id,enum req_op op) {
         default:
             ret = -EIO;
     }
-    spin_unlock(&sbi->zm->zm_info_lock);
     xcpfs_up_write(&sbi->zm->zm_info_sem);
+    spin_unlock(&sbi->zm->zm_info_lock);
     return ret;
 }
 

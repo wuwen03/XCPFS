@@ -4,4 +4,4 @@
 
 fio --ioengine=psync --direct=1 --filename=/mnt/zns/fio --rw=write \
       --bs=4k --group_reporting --zonemode=none --name=seqwrite \
-      --offset_increment=8MB --size=64MB --numjobs=4 --job_max_open_zones=1 --direct=0 --fsync_on_close=1
+      --offset_increment=32MB --size=32MB --numjobs=4 --job_max_open_zones=1 --direct=0 --fsync_on_close=1

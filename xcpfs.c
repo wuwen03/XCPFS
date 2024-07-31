@@ -264,13 +264,15 @@ static void kill_xcpfs_super(struct super_block* sb) {
     }
     do_checkpoint(sb);
     XCPFS_INFO("----------after check point---------");
-    iput(sbi->meta_inode);
-    iput(sbi->node_inode);
-    kill_block_super(sb);
     list_for_each_entry(inode,&sb->s_inodes,i_sb_list) {
+        if(!inode) continue;
         XCPFS_INFO("ino:%d i_nlink:%d i_count:%d",
                         inode->i_ino,inode->i_nlink,inode->i_count);
     }
+    iput(sbi->meta_inode);
+    iput(sbi->node_inode);
+    kill_block_super(sb);
+    XCPFS_INFO("after kill_block_super");   
 }
 struct file_system_type xcpfs_fs_type = {
     .owner = THIS_MODULE,

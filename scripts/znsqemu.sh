@@ -8,7 +8,7 @@ sudo qemu-system-x86_64 \
     -enable-kvm \
     -cpu host \
     -smp 8 \
-    -m 4096 \
+    -m 8G \
     -cdrom $IMGDIR/ubuntu-22.04.4-desktop-amd64.iso \
     -hda $OSIMGF \
     -device nvme,id=nvme0,serial=deadbeef,zoned.zasl=0 \
