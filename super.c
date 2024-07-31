@@ -118,10 +118,11 @@ static void xcpfs_put_super(struct super_block* sb) {
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
     struct xcpfs_nat_info *nm = sbi->nm;
+    struct nat_entry *ne;
     struct page *page;
     struct xcpfs_super_block *raw_super;
     struct xcpfs_zone_info *zone0,*zone1;
-    int zone_id;
+    int zone_id,i;
 
     // do_checkpoint(sb);
     
@@ -134,14 +135,28 @@ static void xcpfs_put_super(struct super_block* sb) {
     sb->s_fs_info = NULL;
 
     //free zm
+    for(i = 0; i < zm->nr_zones; i++) {
+        kfree(zm->zone_info->valid_map);
+    }
     kfree(zm->zone_info);
     kfree(zm->zone_opened);
     kfree(zm->zone_active);
     kfree(zm);
 
     //free nm
+    while(list_empty(&nm->nat_list)) {
+        ne = list_first_entry(&nm->nat_list,struct nat_entry,nat_link);
+        list_del(&ne->nat_link);
+    }
+    while(list_empty(&nm->free_nat)) {
+        ne = list_first_entry(&nm->free_nat,struct nat_entry,nat_link);
+        list_del(&ne->nat_link);
+    }
     kfree(nm);
 
+    if(sbi->cpc) {
+        kfree(sbi->cpc);
+    }
     kfree(sbi);
 }
 

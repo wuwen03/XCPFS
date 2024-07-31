@@ -287,6 +287,7 @@ int validate_blkaddr(struct super_block *sb, block_t blkaddr);
 int invalidate_blkaddr(struct super_block *sb, block_t blkaddr);
 void alloc_zone(struct xcpfs_io_info *xio);
 int flush_zit(struct super_block *sb);
+int blk2zone(struct super_block *sb, block_t iblock);
 
 /*nat_mgmt.c*/
 int insert_nat(struct super_block *sb, int nid, int ino, int blkaddr, bool pinned, bool dirty);

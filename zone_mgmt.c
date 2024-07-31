@@ -214,18 +214,18 @@ int validate_blkaddr(struct super_block *sb, block_t blkaddr) {
     struct xcpfs_zone_info *zi;
     int zone_id;
     int idx;
-    return 0; //TODO
+    // return 0; //TODO
     zone_id = blkaddr / (zm->zone_size >> PAGE_SECTORS_SHIFT);
     idx = blkaddr % (zm->zone_size >> PAGE_SECTORS_SHIFT);
-    
+
     zi = &zm->zone_info[zone_id];
     set_bit(idx,zi->valid_map);
     zi->vblocks ++;
     zi->dirty = true;
-    zi->wp = max(zi->wp,blkaddr << PAGE_SECTORS_SHIFT);
+    zi->wp = max(zi->wp,(blkaddr + 1) << PAGE_SECTORS_SHIFT);
     // zi->wp = umax(zi->wp,blkaddr << PAGE_SECTORS_SHIFT);
-    
-    if((idx << PAGE_SECTORS_SHIFT) + 1 == zm->zone_capacity) {
+    XCPFS_INFO("wp:0x%x capacity:0x%x",zi->wp, zm->zone_capacity)
+    if(zi->wp == zm->zone_capacity + zi->start) {
         zi->cond = BLK_ZONE_COND_FULL;
         remove_zone_active(sb,zi);
         remove_zone_opened(sb,zi);
@@ -241,7 +241,7 @@ int invalidate_blkaddr(struct super_block *sb, block_t blkaddr) {
     struct xcpfs_zone_info *zi;
     int zone_id;
     int idx;
-    return 0; //TODO
+    // return 0; //TODO
     zone_id = blkaddr / (zm->zone_size >> PAGE_SECTORS_SHIFT);
     idx = blkaddr % (zm->zone_size >> PAGE_SECTORS_SHIFT);
     
@@ -276,7 +276,7 @@ static bool zone_is_full(struct super_block *sb, int zone_id) {
     return zi->cond == BLK_ZONE_COND_FULL;
 }
 
-static int blk2zone(struct super_block *sb, block_t iblock) {
+int blk2zone(struct super_block *sb, block_t iblock) {
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     struct xcpfs_zm_info *zm = sbi->zm;
     return iblock / (zm->zone_size >> PAGE_SECTORS_SHIFT);
@@ -353,7 +353,6 @@ int flush_zit(struct super_block *sb) {
         page = xcpfs_prepare_page(sbi->meta_inode,i / ZIT_ENTRY_PER_BLOCK + ZIT_START,true,true);
         raw_entries = (struct xcpfs_zit_block *)page_address(page);
         ze = &raw_entries->entries[i % ZIT_ENTRY_PER_BLOCK];
-        XCPFS_INFO("ze ptr:%p",ze);
         ze->zone_type = zi->zone_type;
         ze->vblocks = zi->vblocks;
         memcpy(ze->valid_map,zi->valid_map,ZONE_VALID_MAP_SIZE);

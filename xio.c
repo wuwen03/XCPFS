@@ -28,6 +28,7 @@ static void xcpfs_write_end_io(struct bio *bio) {
     int offset[5];
     int i,len;
     XCPFS_INFO("inode ino:%d index:%d",xio->ino,xio->iblock);
+    XCPFS_INFO("zoneid:%d new addr:0x%x",blk2zone(sb,xio->new_blkaddr),xio->new_blkaddr);
     XCPFS_INFO("blkaddr:0x%x status:%d",bio->bi_iter.bi_sector >> PAGE_SECTORS_SHIFT,bio->bi_status);
     if(xio->type == META_NODE || xio->type == REG_NODE) {
         XCPFS_INFO("update nat");
