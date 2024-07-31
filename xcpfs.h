@@ -62,6 +62,9 @@ struct xcpfs_nat_entry_sb {
 		__le32 block_addr;
 	} ne;
 };
+
+#define META_NAT_NR ((PAGE_SIZE - sizeof(struct xcpfs_super_block) + 8) \
+/ sizeof(struct xcpfs_nat_entry_sb))
 //on disk super block
 struct xcpfs_super_block {
     __le32 magic;
@@ -283,6 +286,7 @@ int xcpfs_zone_mgmt(struct super_block *sb,int zone_id,enum req_op op);\
 int validate_blkaddr(struct super_block *sb, block_t blkaddr);
 int invalidate_blkaddr(struct super_block *sb, block_t blkaddr);
 void alloc_zone(struct xcpfs_io_info *xio);
+int flush_zit(struct super_block *sb);
 
 /*nat_mgmt.c*/
 int insert_nat(struct super_block *sb, int nid, int ino, int blkaddr, bool pinned, bool dirty);
@@ -371,6 +375,7 @@ extern const struct inode_operations xcpfs_file_inode_operations;
 /*checkpoint.c*/
 struct xcpfs_cpc {
 	int nat_ptr;
+	bool restart;
 	struct page *page;
 	struct xcpfs_super_block *raw_sb;
 };

@@ -81,6 +81,8 @@ static int xcpfs_read_data_folio(struct file *file, struct folio *folio) {
     struct xcpfs_sb_info *sbi = XCPFS_SB(page->mapping->host->i_sb);
     int ret;
     ret = do_prepare_page(page,false);
+    unlock_page(page);
+    put_page(page);
     return ret;
 }
 

@@ -28,7 +28,7 @@ static int __insert_nat(struct super_block *sb, int nid, int ino, int blkaddr, b
     t = __lookup_nat(sb,nid);
     if(t) {
         XCPFS_INFO("nat exists:nid:%d",nid);
-        return 0;
+        return -EEXIST;
     }
 
     if(ne->block_addr){

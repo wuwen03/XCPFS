@@ -41,6 +41,12 @@ int do_checkpoint(struct super_block *sb) {
         sbi->cpc->raw_sb = (struct xcpfs_super_block *)page_address(page);
         init_cpsb(sbi->cpc,sbi);
     }
+restart:
+    if(sbi->cpc->restart) {
+        sbi->cpc->restart = false;
+        memset(sbi->cpc->raw_sb->meta_nat,0,META_NAT_NR * sizeof(struct xcpfs_nat_entry_sb));
+        sbi->cpc->raw_sb->meta_nat_cnt = 0;
+    }
 
     //将缓存在内存中的nat写到page上
 
@@ -49,6 +55,7 @@ int do_checkpoint(struct super_block *sb) {
     /*将所有data block落盘*/
     sbi->cp_phase = 1;
     flush_nat(sb);
+    flush_zit(sb);
     sync_inodes_sb(sb);
     XCPFS_INFO("------------phase 1-------------");
     /*下刷reg node,meta data*/
@@ -67,5 +74,9 @@ int do_checkpoint(struct super_block *sb) {
     XCPFS_INFO("------------phase 3-------------");
 
     XCPFS_INFO("------------------check point end-------------");
+
+    if(sbi->cpc->restart) {
+        goto restart;
+    }
     return 0;
 }

@@ -191,6 +191,8 @@ static int submit_data_xio(struct xcpfs_io_info *xio) {
     len = get_path(offset,xio->iblock);
     dpage = get_dnode_page(page,false,NULL);
     if(IS_ERR_OR_NULL(dpage)) {
+        unlock_page(xio->page);
+        put_page(xio->page);
         end_page_writeback(xio->page);
         return PTR_ERR(dpage);
     }

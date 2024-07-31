@@ -15,6 +15,7 @@ static int xcpfs_setattr(struct mnt_idmap* idmap,
     struct inode *inode = d_inode(dentry);
     int error;
 
+    XCPFS_INFO("start truncate inode:ino %d size:%d",inode->i_ino,inode->i_size);
     error = setattr_prepare(idmap,dentry,attr);
     if(error) {
         return error;

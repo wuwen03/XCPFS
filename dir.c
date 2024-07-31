@@ -256,7 +256,9 @@ fail:
     iput(inode);
     return 0;
 }
-//unlock page
+/*
+page:locked page
+effect:unlock page*/
 static int xcpfs_delete_entry(struct xcpfs_dentry* de, struct page* page) {
     XCPFS_INFO("de ptr:%p page ptr:%p",de,page);
     DEBUG_AT;

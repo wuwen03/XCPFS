@@ -104,6 +104,7 @@ static int xcpfs_zone_open(struct super_block *sb,int zone_id) {
         insert_zone_active(sb,zi);
     }
     zi->cond = BLK_ZONE_COND_EXP_OPEN;
+    zi->dirty = true;
 out:
     return ret;
 }
@@ -302,6 +303,9 @@ retry:
         xcpfs_zone_open(sb,zone_id);
         zi = &zm->zone_info[zone_id];
         zi->zone_type = type;
+        if(xcpfs_rwsem_is_locked(&sbi->cp_sem)) {
+            sbi->cpc->restart = true;
+        }
     }
     goto retry;
 }
@@ -331,9 +335,29 @@ void alloc_zone(struct xcpfs_io_info *xio) {
     }
 }
 
-int flush_dirty_nat(struct super_block *sb) {
+int flush_zit(struct super_block *sb) {
+    DEBUG_AT;
     struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
     struct xcpfs_zm_info *zm = sbi->zm;
-    
+    struct xcpfs_zone_info *entries = zm->zone_info, *zi;
+    struct xcpfs_zit_block *raw_entries;
+    struct xcpfs_zit_entry *ze;
+    struct page *page;
+    int i;
+    for(i = 0; i < zm->nr_zones; i++) {
+        zi = &entries[i];
+        if(zi->dirty == false) {
+            continue;
+        }
+        XCPFS_INFO("zoneid:%d start:%x wp:%x cond:%d type:%d",zi->zone_id,zi->start,zi->wp,zi->cond,zi->zone_type);
+        page = xcpfs_prepare_page(sbi->meta_inode,i / ZIT_ENTRY_PER_BLOCK + ZIT_START,true,true);
+        raw_entries = (struct xcpfs_zit_block *)page_address(page);
+        ze = &raw_entries->entries[i % ZIT_ENTRY_PER_BLOCK];
+        XCPFS_INFO("ze ptr:%p",ze);
+        ze->zone_type = zi->zone_type;
+        ze->vblocks = zi->vblocks;
+        memcpy(ze->valid_map,zi->valid_map,ZONE_VALID_MAP_SIZE);
+        xcpfs_commit_write(page,page_offset(page),PAGE_SIZE);
+    }
     return 0;
 }

@@ -21,7 +21,7 @@ static int xcpfs_recurse(struct inode *inode, int offset[4] ,int depth, int nid)
     page = get_node_page(sb,nid,false);
     wait_for_stable_page(page);
     node = (struct xcpfs_node *)page_address(page);
-    if(depth == 0) {
+    if(depth == 0) {//to be fixed
         dn = &node->dn;
     } else {
         in = &node->in;

@@ -43,7 +43,6 @@ static void xcpfs_evict_inode(struct inode *inode) {
     XCPFS_INFO("nrpages:%d",inode->i_data.nrpages);
     clear_inode(inode);
     XCPFS_INFO("inode state:%x I_FREEING|I_CLEAR:%x",inode->i_state,I_FREEING|I_CLEAR)
-    DEBUG_AT;
 }
 
 static int xcpfs_write_inode(struct inode *inode, struct writeback_control *wbc) {

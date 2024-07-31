@@ -87,7 +87,7 @@ static int xcpfs_read_super(struct super_block *sb) {
     struct xcpfs_super_block *raw_super;
     struct page *page;
     struct xcpfs_nat_entry_sb *ne;
-    int ret = 0;
+    int ret = 0,err;
     int i;
     int temp;
 
@@ -127,7 +127,10 @@ static int xcpfs_read_super(struct super_block *sb) {
         if(ne->nid == 0) {
             continue;
         }
-        insert_nat(sb,ne->nid,ne->ne.ino,ne->ne.block_addr,true,true);
+        err = insert_nat(sb,ne->nid,ne->ne.ino,ne->ne.block_addr,true,true);
+        if(err = -EEXIST) {
+            update_nat(sb,ne->nid,ne->ne.block_addr,true);
+        }
         XCPFS_INFO("meta nat: nid:%d,addr:0x%x\n",ne->nid,ne->ne.block_addr);
     }
 free_page:
@@ -145,6 +148,10 @@ static void xcpfs_get_zit_info(struct super_block *sb) {
     struct xcpfs_zone_info *zi;
     struct page *page;
     int iblock, i, j;
+    for(i = 0; i< zm->nr_zones; i++) {
+        zi = &zm->zone_info[i];
+        zi->valid_map = kmalloc(sizeof(uint8_t) * ZONE_VALID_MAP_SIZE,GFP_KERNEL);
+    }
     for(i = 0; i < DIV_ROUND_UP(zm->nr_zones,ZIT_ENTRY_PER_BLOCK); i ++) {
         iblock = i + ZIT_START;
         page = xcpfs_prepare_page(sbi->meta_inode,iblock,false,false);
@@ -158,10 +165,15 @@ static void xcpfs_get_zit_info(struct super_block *sb) {
                 break;
             }
             zi = &zm->zone_info[i * ZIT_ENTRY_PER_BLOCK + j];
+            if(zi->cond == BLK_ZONE_COND_EMPTY) {
+                continue;
+            }
             zi->zone_type = ze[j].zone_type;
             zi->vblocks = ze[j].vblocks;
+            // zi->valid_map = kmalloc(sizeof(uint8_t) * ZONE_VALID_MAP_SIZE,GFP_KERNEL);
             memcpy(zi->valid_map,ze->valid_map,ZONE_VALID_MAP_SIZE);
             zi->dirty = true;
+            XCPFS_INFO("zoneid:%d start:%x wp:%x cond:%d type:%d",zi->zone_id,zi->start,zi->wp,zi->cond,zi->zone_type);
         }
         unlock_page(page);
         put_page(page);
@@ -185,8 +197,14 @@ static int xcpfs_fill_super(struct super_block* sb, void* data, int silent) {
     sbi->zm = kmalloc(sizeof(struct xcpfs_zm_info),GFP_KERNEL);
     err = xcpfs_init_zm_info(sb);
     sbi->zm->zone_info[3].zone_type = ZONE_TYPE_META_NODE;
+    sbi->zm->zone_info[3].dirty = true;
+    // sbi->zm->zone_info[3].vblocks = kmalloc(sizeof(uint8_t) * ZONE_VALID_MAP_SIZE,GFP_KERNEL);
     sbi->zm->zone_info[5].zone_type = ZONE_TYPE_NODE;
+    sbi->zm->zone_info[5].dirty = true;
+    // sbi->zm->zone_info[5].vblocks = kmalloc(sizeof(uint8_t) * ZONE_VALID_MAP_SIZE,GFP_KERNEL);
     sbi->zm->zone_info[6].zone_type = ZONE_TYPE_DATA;
+    sbi->zm->zone_info[6].dirty = true;
+    // sbi->zm->zone_info[6].vblocks = kmalloc(sizeof(uint8_t) * ZONE_VALID_MAP_SIZE,GFP_KERNEL);
 
     if(err) {
         XCPFS_INFO("err after init_zm_info");

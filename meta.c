@@ -5,7 +5,7 @@ enum page_type get_page_type(struct xcpfs_sb_info *sbi, int ino, loff_t iblock) 
         return META_DATA;
     }
     if(ino == sbi->node_ino) {
-        if(iblock < REG_NAT_START) {
+        if(iblock < REG_NAT_START * NAT_ENTRY_PER_BLOCK) {
             return META_NODE;
         }
         return REG_NODE;
