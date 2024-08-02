@@ -28,6 +28,7 @@ static int __insert_nat(struct super_block *sb, int nid, int ino, int blkaddr, b
     t = __lookup_nat(sb,nid);
     if(t) {
         XCPFS_INFO("nat exists:nid:%d",nid);
+        kfree(ne);
         return -EEXIST;
     }
 
@@ -270,6 +271,7 @@ int flush_nat(struct super_block *sb) {
     struct xcpfs_nat_block *raw_nats;
     struct xcpfs_nat_entry *raw_ne;
     list_for_each_entry_safe(ne,it,&nm->nat_list,nat_link) {
+        if(ne->dirty == false) continue;
         XCPFS_INFO("flush nat:nid:%d addr:0x%x",ne->nid,ne->block_addr);
         iblock = ne->nid / NAT_ENTRY_PER_BLOCK;
         off = ne->nid % NAT_ENTRY_PER_BLOCK;

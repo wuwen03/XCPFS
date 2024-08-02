@@ -11,6 +11,7 @@ int cp_append_nat(struct super_block *sb,struct nat_entry *ne) {
     meta_nat[cpc->raw_sb->meta_nat_cnt].ne.block_addr = ne->block_addr;
     meta_nat[cpc->raw_sb->meta_nat_cnt].ne.ino = ne->ino;
     cpc->raw_sb->meta_nat_cnt ++;
+    XCPFS_INFO("meta_nat_cnt:%d meta_nat_nr:%d",cpc->raw_sb->meta_nat_cnt,META_NAT_NR);
     return 0;
 }
 

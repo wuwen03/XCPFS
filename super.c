@@ -131,7 +131,7 @@ static void xcpfs_put_super(struct super_block* sb) {
 
     // iput(sbi->node_inode);
 
-    dump_fs(sb);
+    // dump_fs(sb);
 
     sb->s_fs_info = NULL;
 
@@ -195,7 +195,6 @@ void dump_fs(struct super_block *sb) {
 //just for debug
 static int xcpfs_statfs(struct dentry* dentry, struct kstatfs* buf) {
     struct super_block *sb = dentry->d_inode->i_sb;
-    
     dump_fs(sb);
     return 0;
 }
@@ -204,7 +203,7 @@ const struct super_operations xcpfs_sops = {
     .alloc_inode = xcpfs_alloc_inode,
     .destroy_inode = xcpfs_destroy_inode,
     .write_inode = xcpfs_write_inode,
-    .drop_inode = xcpfs_drop_inode,
+    // .drop_inode = xcpfs_drop_inode,
     .evict_inode = xcpfs_evict_inode,
     .put_super = xcpfs_put_super,
     .statfs = xcpfs_statfs,

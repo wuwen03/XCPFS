@@ -35,34 +35,14 @@ static void xcpfs_write_end_io(struct bio *bio) {
         update_nat(sb,xio->iblock,bio->bi_iter.bi_sector >> PAGE_SECTORS_SHIFT,false);
         XCPFS_INFO("rwsem:%d cp_phase:%d",xcpfs_rwsem_is_locked(&sbi->cp_sem),sbi->cp_phase);
         if(xcpfs_rwsem_is_locked(&sbi->cp_sem) && sbi->cp_phase == 1) {
-            //TODO
             XCPFS_INFO("append nat in cp phase");
             cp_append_nat(sb,lookup_nat(sb,xio->iblock));
         }
     } else {
-        //TODO
-        // DEBUG_AT;
         XCPFS_INFO("update dnode index");
-        // dpage = get_dnode_page(xio->page,false,NULL);
-        // if(IS_ERR_OR_NULL(dpage)) {
-        //     XCPFS_INFO("dpage not exists");
-        //     goto err;
-        // }
         dpage = xio->dpage;
         node = (struct xcpfs_node *)page_address(dpage);
         len = get_path(offset,page_index(xio->page));
-        // for(i = 0; i < 4; i++) {
-        //     if(i < 3 && offset[i + 1] == -1) {
-        //         if(i == 0) {
-        //             node->i.i_addr[offset[i]] = bio->bi_iter.bi_sector;
-        //         } else {
-        //             node->dn.addr[offset[i]] = bio->bi_iter.bi_sector;
-        //         }
-        //         break;
-        //     } else if(i == 3) {
-        //         node->dn.addr[offset[i]] = bio->bi_iter.bi_sector;
-        //     }
-        // }
         if(len == 0) {
             node->i.i_addr[offset[len]] = bio->bi_iter.bi_sector >> PAGE_SECTORS_SHIFT;
         } else {
@@ -76,7 +56,6 @@ static void xcpfs_write_end_io(struct bio *bio) {
 err:
     validate_blkaddr(sb,bio->bi_iter.bi_sector >> PAGE_SECTORS_SHIFT);
     end_page_writeback(xio->page);
-    // ClearPageDirty(xio->page);
     folio_clear_dirty(page_folio(xio->page));
     if(xio->unlock) {
         unlock_page(xio->page);

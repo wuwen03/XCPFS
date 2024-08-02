@@ -22,8 +22,8 @@ struct xcpfs_nat_entry_sb {
 		uint8_t version;
 		__le32 ino;
 		__le32 block_addr;
-	} ne;
-};
+	} __packed ne;
+} __packed;
 
 struct xcpfs_super_block {
     __le32 magic;
@@ -96,4 +96,4 @@ struct xcpfs_dentry {
 	char name[XCPFS_MAX_FNAME_LEN];
 	nid_t ino;
 	int namelen;
-};
+}__packed;

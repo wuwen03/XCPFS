@@ -31,6 +31,9 @@
 
 #include"xcpfs_rwsem.h"
 
+#define DEBUG
+
+#ifdef DEBUG
 
 #define DEBUG_AT \
     do {\
@@ -41,6 +44,11 @@
 do{\
     printk(KERN_INFO "%s,%d: " str,__FUNCTION__,__LINE__,##args);\
 }while(0);\
+
+#else
+#define DEBUG_AT do{ }while(0);
+#define XCPFS_INFO(str,args...) do{ }while(0);
+#endif
 
 // #define PAGE_SIZE 4096
 #define PAGE_SIZE_BITS 12
@@ -60,8 +68,8 @@ struct xcpfs_nat_entry_sb {
 		uint8_t version;
 		__le32 ino;
 		__le32 block_addr;
-	} ne;
-};
+	} __packed ne;
+} __packed;
 
 #define META_NAT_NR ((PAGE_SIZE - sizeof(struct xcpfs_super_block) + 8) \
 / sizeof(struct xcpfs_nat_entry_sb))
@@ -200,7 +208,7 @@ struct xcpfs_zone_info {
 	uint8_t zone_type;
 	int vblocks;
 	unsigned long *valid_map;
-};
+} __packed;
 
 struct xcpfs_zm_info {
 	spinlock_t zm_info_lock;
@@ -217,7 +225,7 @@ struct xcpfs_zm_info {
 	struct xcpfs_zone_info **zone_opened;
 	int zone_active_count;
 	struct xcpfs_zone_info **zone_active;
-};
+}__packed;
 
 //理论上这里应该有着完整的cache机制，但是为了实现的简单，基本约等于无
 struct nat_entry {
@@ -227,7 +235,7 @@ struct nat_entry {
 	int ino;
 	int block_addr;
 	struct list_head nat_link;
-};
+}__packed;
 
 struct xcpfs_nat_info {
 	// spinlock_t nat_info_lock;
@@ -236,7 +244,7 @@ struct xcpfs_nat_info {
 	struct list_head nat_list;
 	struct list_head free_nat;
 	struct list_head cp_nat;
-};
+}__packed;
 //下面的分割的单位是block
 #define REG_NAT_START 6000
 #define ZIT_START 600000
@@ -267,7 +275,7 @@ struct xcpfs_sb_info {
 	struct xcpfs_rwsem cp_sem;
 	int cp_phase;
 	struct xcpfs_cpc *cpc;
-};
+}__packed;
 
 
 struct xcpfs_inode_info {
@@ -335,7 +343,7 @@ struct xcpfs_io_info {
 
     enum page_type type;
 	bool unlock;
-};
+} __packed;
 
 struct xcpfs_io_info *alloc_xio(void);
 void free_xio(struct xcpfs_io_info *xio);
@@ -380,7 +388,7 @@ struct xcpfs_cpc {
 	bool restart;
 	struct page *page;
 	struct xcpfs_super_block *raw_sb;
-};
+}__packed;
 
 int do_checkpoint(struct super_block *sb);
 
@@ -390,7 +398,7 @@ struct xcpfs_dentry {
 	char name[XCPFS_MAX_FNAME_LEN];
 	nid_t ino;
 	int namelen;
-};
+}__packed;
 extern const struct file_operations xcpfs_dir_operations;
 extern const struct inode_operations xcpfs_dir_inode_operations;
 
