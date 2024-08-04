@@ -51,9 +51,8 @@ static int xcpfs_write_inode(struct inode *inode, struct writeback_control *wbc)
     XCPFS_INFO("wbc->sync_mode:%d",wbc->sync_mode);
     struct xcpfs_sb_info *sbi = XCPFS_SB(inode->i_sb);
     struct page *page;
+    int ret;
     if(inode->i_ino == 2) {
-        // ClearPageDirty(page);
-        // SetPageUptodate(page);
         return 0;
     }
     xcpfs_update_inode_page(inode);
@@ -65,9 +64,14 @@ static int xcpfs_write_inode(struct inode *inode, struct writeback_control *wbc)
     if(wbc->sync_mode == WB_SYNC_ALL) {
         XCPFS_INFO("writing inode ino:%d page ptr:0x%p",inode->i_ino,page);
         XCPFS_INFO("page index:%d refcount:%d",page_to_index(page),page_ref_count(page));
-        write_single_page(page,wbc);
+        ret = write_single_page(page,wbc);
+        if(ret) {
+            unlock_page(page);
+            put_page(page);
+            return -EIO;
+        }
         wait_on_page_writeback(page);
-        get_page(page);//为了实现方便
+        return 0;
     }
     unlock_page(page);
     put_page(page);

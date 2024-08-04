@@ -151,10 +151,10 @@ static int xcpfs_zone_open(struct super_block *sb,int zone_id) {
         goto out;
     }
     // preempt_disable();
-    spin_unlock(&zm->zm_info_lock);
+    // spin_unlock(&zm->zm_info_lock);
     ret = xcpfs_blkdev_zone_mgmt(sb->s_bdev,REQ_OP_ZONE_OPEN,zi->start,zm->zone_size,GFP_NOFS);
     // preempt_enable();
-    spin_lock(&zm->zm_info_lock);
+    // spin_lock(&zm->zm_info_lock);
     if (ret) {
         XCPFS_INFO("open zone error:%d",zone_id);
         goto out;
@@ -280,6 +280,8 @@ int validate_blkaddr(struct super_block *sb, block_t blkaddr) {
     idx = blkaddr % (zm->zone_size >> PAGE_SECTORS_SHIFT);
 
     zi = &zm->zone_info[zone_id];
+
+    spin_lock(&zm->zm_info_lock);
     set_bit(idx,zi->valid_map);
     zi->vblocks ++;
     zi->dirty = true;
@@ -291,6 +293,7 @@ int validate_blkaddr(struct super_block *sb, block_t blkaddr) {
         remove_zone_active(sb,zi);
         remove_zone_opened(sb,zi);
     }
+    spin_unlock(&zm->zm_info_lock);
 
     return 0;
 }
@@ -306,10 +309,13 @@ int invalidate_blkaddr(struct super_block *sb, block_t blkaddr) {
     zone_id = blkaddr / (zm->zone_size >> PAGE_SECTORS_SHIFT);
     idx = blkaddr % (zm->zone_size >> PAGE_SECTORS_SHIFT);
     
+    spin_lock(&zm->zm_info_lock);
     zi = &zm->zone_info[zone_id];
     clear_bit(idx,zi->valid_map);
     zi->vblocks --;
     zi->dirty = true;
+    spin_unlock(&zm->zm_info_lock);
+
     return 0;
 }
 
@@ -346,24 +352,36 @@ int blk2zone(struct super_block *sb, block_t iblock) {
 static int get_zone(struct super_block *sb, enum page_type type) {
     struct xcpfs_sb_info *sbi = sb->s_fs_info;
     struct xcpfs_zm_info *zm = sbi->zm;
-    struct xcpfs_zone_info *zi;
-    int i;
-    int zone_id;
+    struct xcpfs_zone_info *zi, *tar = NULL;
+    int i, zone_id;
+    sector_t inflight = LONG_MAX;
     int ret = -EZONE;
+    if(zm->nr_type[type] < zm->limit_type[type]) {
+        goto open;
+    }
 retry:
-    for (i = 0; i < zm->max_open_zones; i++) {
+    tar = NULL;
+    for (i = 0; i < zm->max_open_zones; i ++) {
         zi = zm->zone_opened[i];
         if(!zi) continue;
-        if(zi->zone_type == type) {
-            return zi->zone_id;
+        if(zi->zone_type == type && zi->wp + zi->write_inflight - zi->start < inflight) {
+            inflight = zi->wp + zi->write_inflight;
+            tar = zi;
         }
+        // if(zi->zone_type == type) {
+        //     return zi->zone_id;
+        // }
     }
-
+    if(tar) {
+        return tar->zone_id;
+    }
+open:
     if(zm->zone_opened_count < zm->max_open_zones) {
         zone_id = get_empty_zone(sb);
         xcpfs_zone_open(sb,zone_id);
         zi = &zm->zone_info[zone_id];
         zi->zone_type = type;
+        zm->nr_type[type] ++;
         if(xcpfs_rwsem_is_locked(&sbi->cp_sem)) {
             sbi->cpc->restart = true;
         }
@@ -385,18 +403,40 @@ void alloc_zone(struct xcpfs_io_info *xio) {
     } else {
         zone_id = blk2zone(sbi->sb,xio->old_blkaddr);
         XCPFS_INFO("write op zone id:0x%x",zone_id);
+
         spin_lock(&zm->zm_info_lock);
         // spin_lock_irqsave(&zm->zm_info_lock,flags);
         if(zone_is_full(sbi->sb,zone_id) || zone_id == 0) {
             zone_id = get_zone(sbi->sb,xio->type);
         }
-        // xio->new_blkaddr = zone_id * (zm->zone_size >> PAGE_SECTORS_SHIFT);
         xio->new_blkaddr = zm->zone_info[zone_id].start >> PAGE_SECTORS_SHIFT;
-        invalidate_blkaddr(sbi->sb,xio->old_blkaddr);
         spin_unlock(&zm->zm_info_lock);
+        
+        invalidate_blkaddr(sbi->sb,xio->old_blkaddr);
         // spin_unlock_irqrestore(&zm->zm_info_lock,flags);
         XCPFS_INFO("write op zoneid:%d zslba:0x%x",zone_id,xio->new_blkaddr);
     }
+    
+}
+
+int start_flight(struct super_block *sb, int zone_id) {
+    DEBUG_AT;
+    struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
+    struct xcpfs_zm_info *zm = sbi->zm;
+    // spin_lock(&zm->zm_info_lock);
+    // zm->zone_info[zone_id].write_inflight += PAGE_SECTORS;
+    // spin_unlock(&zm->zm_info_lock);
+    return 0;
+}
+
+int end_flight(struct super_block *sb, int zone_id) {
+    DEBUG_AT;
+    struct xcpfs_sb_info *sbi = XCPFS_SB(sb);
+    struct xcpfs_zm_info *zm = sbi->zm;
+    // spin_lock(&zm->zm_info_lock);
+    // zm->zone_info[zone_id].write_inflight -= PAGE_SECTORS;
+    // spin_unlock(&zm->zm_info_lock);
+    return 0;
 }
 
 int flush_zit(struct super_block *sb) {

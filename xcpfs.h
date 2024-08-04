@@ -197,13 +197,13 @@ struct xcpfs_summary_block {
 	struct xcpfs_summary entries[ENTRIES_IN_SUM];
 } __packed;
 
-struct xcpfs_zone_info {
-	
+struct xcpfs_zone_info {	
 	int zone_id;
 	enum blk_zone_cond cond;
 	sector_t wp;
 	sector_t start;
-	
+	sector_t write_inflight;
+
 	bool dirty;
 	uint8_t zone_type;
 	int vblocks;
@@ -217,8 +217,10 @@ struct xcpfs_zm_info {
 	sector_t zone_capacity;			//capacity of a zone(in bytes)
 	int nr_zones;				//total zone number
 
-	int max_open_zones;		//most # of zones in open state
-	int max_active_zones;	//most # of zones in active state
+	int max_open_zones;		//at most # of zones in open state
+	int max_active_zones;	//at most # of zones in active state
+	int nr_type[5];			//# of zones of a zone type in open state
+	int limit_type[5];		//at most # of zones of a zone type in open state
 
 	struct xcpfs_zone_info *zone_info;
 	int zone_opened_count;
@@ -296,6 +298,8 @@ int invalidate_blkaddr(struct super_block *sb, block_t blkaddr);
 void alloc_zone(struct xcpfs_io_info *xio);
 int flush_zit(struct super_block *sb);
 int blk2zone(struct super_block *sb, block_t iblock);
+int start_flight(struct super_block *sb, int zone_id);
+int end_flight(struct super_block *sb, int zone_id);
 
 /*nat_mgmt.c*/
 int insert_nat(struct super_block *sb, int nid, int ino, int blkaddr, bool pinned, bool dirty);
@@ -342,7 +346,7 @@ struct xcpfs_io_info {
 	blk_opf_t op_flags;
 
     enum page_type type;
-	bool unlock;
+	bool unlock;			//unlock和put一起完成，这里的unlock指导的是end_io回调里面的行为
 } __packed;
 
 struct xcpfs_io_info *alloc_xio(void);

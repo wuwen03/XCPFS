@@ -61,20 +61,18 @@ restart:
     XCPFS_INFO("------------phase 1-------------");
     /*下刷reg node,meta data*/
     XCPFS_INFO("------------phase 2-------------");
-    sbi->cp_phase = 1;
+    sbi->cp_phase = 2;
     filemap_write_and_wait_range(sbi->meta_inode->i_mapping,REG_NAT_START * PAGE_SIZE,LLONG_MAX);
     filemap_write_and_wait_range(sbi->meta_inode->i_mapping,0,LLONG_MAX);
     filemap_write_and_wait_range(sbi->node_inode->i_mapping,REG_NAT_START * NAT_ENTRY_PER_BLOCK * PAGE_SIZE,LLONG_MAX);
     filemap_write_and_wait_range(sbi->node_inode->i_mapping,0,REG_NAT_START * NAT_ENTRY_PER_BLOCK * PAGE_SIZE);
-
     XCPFS_INFO("------------phase 2-------------");
     XCPFS_INFO("------------phase 3-------------");
     cp_append_nat(sb,lookup_nat(sb,1));
     cp_append_nat(sb,lookup_nat(sb,3));
-    xcpfs_up_write(&sbi->cp_sem);
     XCPFS_INFO("------------phase 3-------------");
-
     XCPFS_INFO("------------------check point end-------------");
+    xcpfs_up_write(&sbi->cp_sem);
 
     if(sbi->cpc->restart) {
         goto restart;

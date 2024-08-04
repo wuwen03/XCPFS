@@ -64,6 +64,12 @@ static int xcpfs_init_zm_info(struct super_block *sb) {
     ret = blkdev_report_zones(bdev,0,BLK_ALL_ZONES,xcpfs_report_zones_cb,sb);
     XCPFS_INFO("size:0x%x cap:0x%x",zm->zone_size,zm->zone_capacity);
     XCPFS_INFO("ret:%d",ret);
+
+    zm->limit_type[ZONE_TYPE_META_DATA] = 1;
+    zm->limit_type[ZONE_TYPE_META_DATA] = 1;
+    zm->limit_type[ZONE_TYPE_NODE] = 2;
+    zm->limit_type[ZONE_TYPE_DATA] = zm->max_open_zones - 1 - 1 - 2 - 1 - 1; //1 superblock 1 reserved
+
     return 0;
 }
 //初始化部分nat
@@ -150,7 +156,8 @@ static void xcpfs_get_zit_info(struct super_block *sb) {
     int iblock, i, j;
     for(i = 0; i< zm->nr_zones; i++) {
         zi = &zm->zone_info[i];
-        zi->valid_map = kmalloc(sizeof(uint8_t) * ZONE_VALID_MAP_SIZE,GFP_KERNEL);
+        zi->valid_map = kmalloc(sizeof(uint8_t) * ZONE_VALID_MAP_SIZE * 4,GFP_KERNEL);
+        zi->write_inflight = 0;
     }
     for(i = 0; i < DIV_ROUND_UP(zm->nr_zones,ZIT_ENTRY_PER_BLOCK); i ++) {
         iblock = i + ZIT_START;
@@ -170,9 +177,9 @@ static void xcpfs_get_zit_info(struct super_block *sb) {
             }
             zi->zone_type = ze[j].zone_type;
             zi->vblocks = ze[j].vblocks;
-            // zi->valid_map = kmalloc(sizeof(uint8_t) * ZONE_VALID_MAP_SIZE,GFP_KERNEL);
-            memcpy(zi->valid_map,ze->valid_map,ZONE_VALID_MAP_SIZE);
             zi->dirty = true;
+            memcpy(zi->valid_map,ze->valid_map,ZONE_VALID_MAP_SIZE);
+            zm->nr_type[zi->zone_type] ++;
             XCPFS_INFO("zoneid:%d start:%x wp:%x cond:%d type:%d",zi->zone_id,zi->start,zi->wp,zi->cond,zi->zone_type);
         }
         unlock_page(page);

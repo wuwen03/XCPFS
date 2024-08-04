@@ -60,13 +60,15 @@ void xcpfs_free_page(struct page *page) {
     if(IS_ERR_OR_NULL(page)) {
         return;
     }
-    unlock_page(page);
+    if(PageLocked(page)) {
+        unlock_page(page);
+    }
     __free_page(page);
 }
 
 /*
 para:page:locked page and ref has been increased
-return:!(unlocked page with decreased ref)
+return:对于传入的page不做改变   //!(unlocked page with decreased ref)
 */
 int do_prepare_page(struct page *page, bool create) {
     DEBUG_AT;
@@ -95,9 +97,7 @@ int do_prepare_page(struct page *page, bool create) {
     unlock_page(dpage);
     put_page(dpage);
     XCPFS_INFO("ino:%d,index:%d,create:%d,need:%d",inode->i_ino,index,create,need)
-    if(IS_ERR_OR_NULL(dpage)) {
-        return -EIO;
-    } else if(need) {
+    if(need) {
         XCPFS_INFO("need create");
         zero_user_segment(page,0,PAGE_SIZE);
         SetPageUptodate(page);
@@ -116,9 +116,9 @@ int do_prepare_page(struct page *page, bool create) {
         xio->type = get_page_type(sbi,inode->i_ino,index);
         xio->page = page;
         xio->unlock = true;
+        get_page(page);
         xcpfs_submit_xio(xio);
         lock_page(page);
-        get_page(page);
     }
     
     return 0;
@@ -217,8 +217,8 @@ int do_write_single_page(struct page *page,struct writeback_control *wbc) {
     xio->op_flags = wbc ? wbc_to_write_flags(wbc) : 0;
     xio->type = get_page_type(xio->sbi,xio->ino,xio->iblock);
     xio->page = page;
-    // xio->unlock = true;
-    xio->unlock = false;
+    xio->unlock = true;
+    // xio->unlock = false;
     ret= xcpfs_submit_xio(xio);
     return ret;
 }

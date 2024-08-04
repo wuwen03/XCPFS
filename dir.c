@@ -152,9 +152,7 @@ static struct xcpfs_dentry *xcpfs_find_entry(struct dentry* dentry,struct page *
             continue;
         }
         if(de->namelen == namelen && strcmp(de->name,name) == 0) {
-            XCPFS_INFO("get entry");
             *res_page = page;
-            XCPFS_INFO("get entry");
             return de;
         }
         unlock_page(page);

@@ -28,13 +28,13 @@ static void xcpfs_write_end_io(struct bio *bio) {
     int offset[5];
     int i,len;
     XCPFS_INFO("inode ino:%d index:%d",xio->ino,xio->iblock);
-    XCPFS_INFO("zoneid:%d new addr:0x%x",blk2zone(sb,xio->new_blkaddr),xio->new_blkaddr);
-    XCPFS_INFO("blkaddr:0x%x status:%d",bio->bi_iter.bi_sector >> PAGE_SECTORS_SHIFT,bio->bi_status);
+    // XCPFS_INFO("zoneid:%d new addr:0x%x",blk2zone(sb,xio->new_blkaddr),xio->new_blkaddr);
+    // XCPFS_INFO("blkaddr:0x%x status:%d",bio->bi_iter.bi_sector >> PAGE_SECTORS_SHIFT,bio->bi_status);
     if(xio->type == META_NODE || xio->type == REG_NODE) {
         XCPFS_INFO("update nat");
         update_nat(sb,xio->iblock,bio->bi_iter.bi_sector >> PAGE_SECTORS_SHIFT,false);
-        XCPFS_INFO("rwsem:%d cp_phase:%d",xcpfs_rwsem_is_locked(&sbi->cp_sem),sbi->cp_phase);
-        if(xcpfs_rwsem_is_locked(&sbi->cp_sem) && sbi->cp_phase == 1) {
+        // XCPFS_INFO("rwsem:%d cp_phase:%d",xcpfs_rwsem_is_locked(&sbi->cp_sem),sbi->cp_phase);
+        if(xcpfs_rwsem_is_locked(&sbi->cp_sem) && sbi->cp_phase == 2) {
             XCPFS_INFO("append nat in cp phase");
             cp_append_nat(sb,lookup_nat(sb,xio->iblock));
         }
@@ -55,6 +55,7 @@ static void xcpfs_write_end_io(struct bio *bio) {
     }
 err:
     validate_blkaddr(sb,bio->bi_iter.bi_sector >> PAGE_SECTORS_SHIFT);
+    end_flight(sb,blk2zone(sb,xio->new_blkaddr));
     end_page_writeback(xio->page);
     folio_clear_dirty(page_folio(xio->page));
     if(xio->unlock) {
@@ -76,8 +77,9 @@ void free_xio(struct xcpfs_io_info *xio) {
 }
 
 static struct bio *__alloc_bio(struct xcpfs_io_info *xio) {
-    // XCPFS_INFO("xio->page ptr:0x%p",xio->page);
+    DEBUG_AT;
     struct bio *bio;
+    struct super_block *sb = xio->sbi->sb;
     bio = bio_alloc(xio->sbi->sb->s_bdev,1,xio->op | xio->op_flags,GFP_NOIO);
     bio_add_page(bio,xio->page,PAGE_SIZE,0);
     bio->bi_private = xio;
@@ -90,13 +92,10 @@ static struct bio *__alloc_bio(struct xcpfs_io_info *xio) {
     if(xio->op == REQ_OP_READ) {
         bio->bi_end_io = xcpfs_read_end_io;
     } else {
-        // XCPFS_INFO("xio->page ptr:0x%p",xio->page);
         XCPFS_INFO("inode ino:%d page index:%d",xio->page->mapping->host->i_ino,page_to_index(xio->page));
-        // XCPFS_INFO("page ref:%d",page_ref_count(xio->page));
-        // set_page_writeback(xio->page);
         bio->bi_end_io = xcpfs_write_end_io;
+        start_flight(sb,blk2zone(sb,xio->new_blkaddr));
     }
-    // XCPFS_INFO("out alloc bio");
     return bio;
 }
 
@@ -110,17 +109,6 @@ static int submit_node_xio(struct xcpfs_io_info *xio) {
     struct nat_entry *ne;
     int ret;
 
-    // if(!xio->page) {   
-    //     if(xio->op == REQ_OP_READ) {
-    //         page = grab_cache_page(mapping,xio->ino);
-    //         if(PageUptodate(page)) {
-    //             return page;
-    //         }
-    //     } else {
-    //         page = grab_cache_page_write_begin(mapping,xio->ino);
-    //     }
-    //     xio->page = page;
-    // }
     page = xio->page;
     if(page == NULL) {
         return -EIO;
@@ -135,13 +123,14 @@ static int submit_node_xio(struct xcpfs_io_info *xio) {
             zero_user_segment(page,0,PAGE_SIZE);
         }
         SetPageUptodate(page);
-        unlock_page(page);
-        put_page(page);
-        // end_page_writeback(page);
+        if(xio->unlock) {
+            unlock_page(page);
+            put_page(page);
+        }
         return 0;
     }
     alloc_zone(xio);
-    XCPFS_INFO("node mapping_use_writeback_tags:%d",mapping_use_writeback_tags(mapping))
+    // XCPFS_INFO("node mapping_use_writeback_tags:%d",mapping_use_writeback_tags(mapping))
     bio = __alloc_bio(xio);
     bio->bi_private = xio;
     submit_bio(bio);
@@ -171,9 +160,13 @@ static int submit_data_xio(struct xcpfs_io_info *xio) {
     len = get_path(offset,xio->iblock);
     dpage = get_dnode_page(page,false,NULL);
     if(IS_ERR_OR_NULL(dpage)) {
-        unlock_page(xio->page);
-        put_page(xio->page);
-        end_page_writeback(xio->page);
+        // if(xio->unlock) {
+        //     unlock_page(xio->page);
+        //     put_page(xio->page);
+        // }
+        if(xio->op != REQ_OP_READ) {
+            end_page_writeback(xio->page);
+        }
         return PTR_ERR(dpage);
     }
     
@@ -189,9 +182,10 @@ static int submit_data_xio(struct xcpfs_io_info *xio) {
         put_page(dpage);
     } else {
         xio->dpage = dpage;
-        wait_on_page_writeback(dpage);
+        // wait_on_page_writeback(dpage);
+        wait_for_stable_page(dpage);
     }
-    XCPFS_INFO("data mapping_use_writeback_tags:%d",mapping_use_writeback_tags(mapping))
+    // XCPFS_INFO("data mapping_use_writeback_tags:%d",mapping_use_writeback_tags(mapping))
     alloc_zone(xio);
     bio = __alloc_bio(xio);
     bio->bi_private = xio;
