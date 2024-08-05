@@ -12,11 +12,13 @@ static int xcpfs_recurse(struct inode *inode, int offset[4] ,int depth, int nid)
     int len = 0;
     int i;
 
-    for(i = 0; i < 4; i++) {
-        if(offset[i] == -1) {
-            break;
+    if(offset) {    
+        for(i = 0; i < 4; i++) {
+            if(offset[i] == -1) {
+                break;
+            }
+            len ++;
         }
-        len ++;
     }
     // page = get_node_page(sb,nid,false);
     // wait_for_stable_page(page);
@@ -29,27 +31,37 @@ static int xcpfs_recurse(struct inode *inode, int offset[4] ,int depth, int nid)
     }
 
     i = (offset == NULL ? 0 : offset[len - depth - 1]);
+    if(depth) i++; //如果不是直接块，那么从这个偏移量下一个开始都要全部清除，这个偏移量是否清除之后判断
     for(;i < DEF_NIDS_PER_BLOCK; i++) {
         if(depth == 0) {
+            //直接块
             if(dn->addr[i]) {
                 invalidate_blkaddr(sb,dn->addr[i]);
                 dn->addr[i] = 0;
             }
             continue;
-        }        
+        }
+        //间接块
         if(in->nid[i]) {
-            xcpfs_recurse(inode,offset,depth - 1, in->nid[i]);
+            xcpfs_recurse(inode,NULL,depth - 1, in->nid[i]); //全部清除
             invalidate_nat(sb,in->nid[i]);
             in->nid[i] = 0;
         }
     }
-    if(offset && depth == 0) {
-        offset[len - 1] --;
-    }
-    if(offset && depth != 0 && offset[len - depth - 1 + 1] == 0) {
-        invalidate_nat(sb,in->nid[offset[len - depth - 1]]);
-        in->nid[i] = 0;
-        offset[len - depth - 1] --;
+    if(offset) {
+        if(depth == 0) {
+            //如果是间接块
+            offset[len - 1] --;
+        } else {
+            //如果间接块下一级被完全清空，则此处偏移量处也要清除
+            if(offset[len - depth - 1 + 1] == 0) {
+                invalidate_nat(sb,in->nid[offset[len - depth - 1]]);
+                in->nid[i] = 0;
+                offset[len - depth - 1] --;
+            }
+        }
+    } else {
+
     }
     if(!offset || offset[len - depth - 1] == 0) {
         ClearPageUptodate(page);
@@ -57,8 +69,6 @@ static int xcpfs_recurse(struct inode *inode, int offset[4] ,int depth, int nid)
         set_page_dirty(page);
         // SetPageDirty(page);
     }
-    // unlock_page(page);
-    // put_page(page);
     xcpfs_commit_write(page,page_offset(page),PAGE_SIZE);
     return 0;
 }
@@ -177,7 +187,7 @@ static int xcpfs_do_truncate(struct inode *inode, int from, bool lock) {
     iblock = (pgoff_t)(from >> PAGE_SIZE_BITS);
     offset = from - (iblock << PAGE_SIZE_BITS);
     xcpfs_truncate_partial_block(inode,iblock,offset);
-    invalidate_mapping_pages(inode->i_mapping,from,-1);
+    invalidate_mapping_pages(inode->i_mapping,free_from,-1);
 
     if(lock) {
         xcpfs_up_read(&sbi->cp_sem);

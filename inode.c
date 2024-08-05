@@ -96,9 +96,9 @@ static int xcpfs_write_data_page(struct page *page, struct writeback_control *wb
     struct folio *folio = page_folio(page);
     int ret = -EAGAIN, index = page_to_index(page);
     XCPFS_INFO("write data page:inode ino:%d page index:%d",inode->i_ino,page_to_index(page));
-    //对于node inode的meta node部分
-    if(inode->i_ino == 2 && index < REG_NAT_START * NAT_ENTRY_PER_BLOCK &&
-              sbi->cp_phase != 1 && wbc->sync_mode == WB_SYNC_NONE) {
+    //对于node inode的meta node部分,如果
+    if(inode->i_ino == 2 && index < REG_NAT_START * NAT_ENTRY_PER_BLOCK && 
+                sbi->cp_phase < 2 && wbc->sync_mode == WB_SYNC_NONE) {
         redirty_page_for_writepage(wbc,page);
         unlock_page(page);
         return 0;

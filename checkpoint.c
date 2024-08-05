@@ -48,24 +48,28 @@ restart:
         memset(sbi->cpc->raw_sb->meta_nat,0,META_NAT_NR * sizeof(struct xcpfs_nat_entry_sb));
         sbi->cpc->raw_sb->meta_nat_cnt = 0;
     }
+    sbi->cp_phase = 0;
 
     //将缓存在内存中的nat写到page上
 
     xcpfs_down_write(&sbi->cp_sem);
     XCPFS_INFO("------------phase 1-------------");
-    /*将所有data block落盘*/
+    /*将所有data block与对应的node落盘*/
     sbi->cp_phase = 1;
+    sync_inodes_sb(sb);
+    filemap_write_and_wait_range(sbi->node_inode->i_mapping,REG_NAT_START * NAT_ENTRY_PER_BLOCK * PAGE_SIZE,LLONG_MAX);
+    XCPFS_INFO("------------phase 1-------------");
+    XCPFS_INFO("------------phase 2-------------");
+    /*
+        首先刷新nat和zit，此时reg的数据块和node块对应的的元数据都是最新的，之后对于nat的更新全部放到超级块中
+        然后依次将元数据落盘，元数据对应的node落盘
+    */
+    sbi->cp_phase = 2;
     flush_nat(sb);
     flush_zit(sb);
-    sync_inodes_sb(sb);
-    XCPFS_INFO("------------phase 1-------------");
-    /*下刷reg node,meta data*/
-    XCPFS_INFO("------------phase 2-------------");
-    sbi->cp_phase = 2;
     filemap_write_and_wait_range(sbi->meta_inode->i_mapping,REG_NAT_START * PAGE_SIZE,LLONG_MAX);
     filemap_write_and_wait_range(sbi->meta_inode->i_mapping,0,LLONG_MAX);
-    filemap_write_and_wait_range(sbi->node_inode->i_mapping,REG_NAT_START * NAT_ENTRY_PER_BLOCK * PAGE_SIZE,LLONG_MAX);
-    filemap_write_and_wait_range(sbi->node_inode->i_mapping,0,REG_NAT_START * NAT_ENTRY_PER_BLOCK * PAGE_SIZE);
+    filemap_write_and_wait_range(sbi->node_inode->i_mapping,0,REG_NAT_START * NAT_ENTRY_PER_BLOCK * PAGE_SIZE - 1);
     XCPFS_INFO("------------phase 2-------------");
     XCPFS_INFO("------------phase 3-------------");
     cp_append_nat(sb,lookup_nat(sb,1));

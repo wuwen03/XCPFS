@@ -8,6 +8,6 @@
 fio   --ioengine=psync --direct=0 \
       --directory=/mnt/zns \
       --filename=fio1:fio2:fio2:fio4:fio5:fio6:fio7:fio8 \
-      --rw=ranwrite \
+      --rw=randwrite \
       --bs=4k --group_reporting --zonemode=none --name=seqwrite \
       --offset_increment=0MB --size=128MB --numjobs=8 --fsync_on_close=1 --iodepth=16
